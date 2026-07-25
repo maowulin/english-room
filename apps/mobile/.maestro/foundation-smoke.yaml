@@ -1,0 +1,16 @@
+appId: com.maowulin.englishroomdemo
+name: 基础 Demo 页面验收
+---
+- launchApp:
+    stopApp: true
+- openLink: ${EXPO_DEV_CLIENT_URL}
+- extendedWaitUntil:
+    visible: 多人英语实时语音房间与局后评分
+    timeout: 20000
+- assertVisible: 多人英语实时语音房间与局后评分
+- assertVisible: Expo Development Build
+- assertVisible: 已启用
+- assertVisible: FastAPI 控制面
+- assertVisible: 服务在线
+- assertVisible: TRTC 实时语音
+- assertVisible: 下一阶段接入
