@@ -2,7 +2,7 @@
 
 一个面向候选人实作题的多人英语实时语音房间 Demo。
 
-项目计划使用 React Native Expo 构建客户端，并配套独立后端。当前阶段先完成需求澄清和架构设计，再开始搭建可运行代码。
+项目使用 React Native Expo 构建客户端，并使用 Python FastAPI 提供后端 API。
 
 ## 当前目标
 
@@ -15,14 +15,17 @@
 ## 已确认的技术选择
 
 - 客户端：React Native Expo
-- 后端：必需，具体框架待架构讨论确认
+- 客户端运行方式：Expo Development Build
+- 后端：Python FastAPI
 - 实时音频：腾讯云 TRTC
 - 口语评分：腾讯云口语评测（新版）
 
 ## 文档
 
 - [架构讨论记录](./docs/discussions/2026-07-25-architecture-notes.md)
+- [需求解读](./docs/requirements/assessment-brief.md)
+- [原始题目副本说明](./docs/source/README.md)
 
 ## 项目状态
 
-当前处于架构设计阶段，尚未开始业务代码实现。
+当前正在搭建可运行的基础框架。
