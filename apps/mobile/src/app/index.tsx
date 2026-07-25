@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DemoStatusCard } from "@/components/demo-status-card";
+import { RoomApp } from "@/features/session/room-app";
 import { ApiClient, type HealthStatus } from "@/services/api-client";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 
@@ -122,8 +123,10 @@ export function DemoScreen({
 }
 
 export default function HomeScreen() {
-  return <DemoScreen />;
+  return <RoomApp />;
 }
+
+export { RoomApp };
 
 const styles = StyleSheet.create({
   safeArea: {
