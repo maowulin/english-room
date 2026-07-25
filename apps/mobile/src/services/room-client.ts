@@ -13,6 +13,9 @@ export type ReportItem = {
   scoreJobId: string;
   status: "completed" | "processing" | "waiting" | "failed";
   score?: number;
+  pronunciation?: number;
+  fluency?: number;
+  recognizedText?: string;
 };
 export type RoomReport = { roomId: string; items: ReportItem[] };
 
@@ -174,11 +177,14 @@ export class HttpRoomClient implements RoomClient {
   async getRoomReport(roomId: string): Promise<RoomReport> {
     const payload = await this.request(`/v1/rooms/${roomId}/report`, { method: "GET" }) as { room: RoomSnapshot; score_jobs: { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number> }[] };
     this.mapRoom(payload.room);
-    return { roomId, items: payload.score_jobs.map((job) => ({ playerName: job.player_id, scoreJobId: job.score_job_id, status: job.status, score: job.scores?.total })) };
+    return { roomId, items: payload.score_jobs.map((job) => this.mapReportItem(job)) };
   }
   async retryScoreJob(scoreJobId: string): Promise<ReportItem> {
     const job = await this.request(`/v1/score-jobs/${scoreJobId}/retry`, { method: "POST" }) as { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number> };
-    return { playerName: job.player_id, scoreJobId: job.score_job_id, status: job.status, score: job.scores?.total };
+    return this.mapReportItem(job);
+  }
+  private mapReportItem(job: { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number>; recognized_text?: string }): ReportItem {
+    return { playerName: job.player_id, scoreJobId: job.score_job_id, status: job.status, score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text };
   }
   private async versioned(roomId: string, method: "POST" | "PUT", suffix: string): Promise<Room> {
     return this.mapRoom(await this.request(`/v1/rooms/${roomId}${suffix}`, { method, body: JSON.stringify({ room_version: this.versions.get(roomId) ?? 1 }) }) as RoomSnapshot);

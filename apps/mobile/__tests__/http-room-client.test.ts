@@ -16,7 +16,7 @@ describe("HttpRoomClient", () => {
     fetcher
       .mockResolvedValueOnce({ ok: true, json: async () => ({ player_id: "p1", access_token: "token", profile: { display_name: "Mint" } }) } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "雾港疑云", status: "lobby", version: 3, members: [] }) } as Response)
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ room: { room_id: "r1", room_code: "4827", title: "雾港疑云", status: "ended", version: 5, members: [] }, score_jobs: [{ score_job_id: "s1", player_id: "p1", status: "failed", scores: { total: 86 } }] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ room: { room_id: "r1", room_code: "4827", title: "雾港疑云", status: "ended", version: 5, members: [] }, score_jobs: [{ score_job_id: "s1", player_id: "p1", status: "failed", scores: { overall: 86, pronunciation: 88, fluency: 82 }, recognized_text: "Hello" }] }) } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ score_job_id: "s1", player_id: "p1", status: "processing", scores: {} }) } as Response);
     const client = new HttpRoomClient({ baseUrl: "http://api/", fetcher, idGenerator: () => "key-1" });
 
