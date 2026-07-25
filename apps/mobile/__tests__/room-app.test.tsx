@@ -27,4 +27,21 @@ describe("RoomApp", () => {
     await act(async () => fireEvent.press(view.getByTestId("end-room-button")));
     expect(await view.findByText("本局口语报告")).toBeTruthy();
   });
+
+  it("shows the registration steps and a reconnecting visual state", async () => {
+    const registerView = await render(<RoomApp />);
+
+    await act(async () => fireEvent.press(registerView.getByLabelText("前往注册")));
+    expect(await registerView.findByText("1")).toBeTruthy();
+    expect(registerView.getByText("发送验证码")).toBeTruthy();
+
+    const liveView = await render(<RoomApp />);
+    await act(async () => fireEvent.press(liveView.getByTestId("login-button")));
+    await act(async () => fireEvent.press(await liveView.findByTestId("create-room-button")));
+    await act(async () => fireEvent.press(liveView.getByTestId("ready-button")));
+    await act(async () => fireEvent.press(liveView.getByTestId("start-room-button")));
+    await act(async () => fireEvent.press(liveView.getByTestId("reconnect-button")));
+
+    expect(await liveView.findByText("重新连接中")).toBeTruthy();
+  });
 });

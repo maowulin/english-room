@@ -10,6 +10,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { sessionReducer, initialSessionState, type Screen } from "./session-reducer";
+import { AuthScreen as VisualAuthScreen } from "./auth-screen";
+import {
+  LiveScreen,
+  LobbyScreen,
+  ReportScreen,
+  WaitingScreen,
+} from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 
 const seats = [
@@ -53,7 +60,7 @@ function Brand() {
   );
 }
 
-function AuthScreen({ mode, onLogin, onToggle }: { mode: "login" | "register"; onLogin: () => void; onToggle: () => void }) {
+export function LegacyAuthScreen({ mode, onLogin, onToggle }: { mode: "login" | "register"; onLogin: () => void; onToggle: () => void }) {
   const [email, setEmail] = useState("");
   const register = mode === "register";
   return (
@@ -89,7 +96,7 @@ function Field(props: { label: string; placeholder: string; value?: string; onCh
   return <View style={styles.field}><Text style={styles.fieldLabel}>{props.label}</Text><TextInput accessibilityLabel={props.label} autoCapitalize="none" onChangeText={props.onChangeText} placeholder={props.placeholder} placeholderTextColor="#91A29F" secureTextEntry={props.secureTextEntry} style={styles.input} testID={props.testID} value={props.value} /></View>;
 }
 
-function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
+export function LegacyLobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
   const [code, setCode] = useState("");
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>TONIGHT’S ENGLISH SESSION</Text><Text style={styles.display}>今晚想练哪一句？</Text><Text style={styles.muted}>选择一张语言卡，和伙伴进入一场 20 分钟的真实对话。</Text>
     <View style={styles.topicCard}><Text style={styles.topicBadge}>推荐主题</Text><Text style={styles.topicTitle}>午夜咖啡馆</Text><Text style={styles.topicBody}>用英语聊聊你的城市、旅行和此刻的心情。</Text><View style={styles.topicFooter}><Text style={styles.accentText}>20 MIN · 2–4 人</Text><Text style={styles.topicNumber}>01</Text></View></View>
@@ -98,7 +105,7 @@ function Lobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void 
   </ScrollView></SafeAreaView>;
 }
 
-function Waiting({ ready, onReady, onStart, onLeave }: { ready: boolean; onReady: () => void; onStart: () => void; onLeave: () => void }) {
+export function LegacyWaiting({ ready, onReady, onStart, onLeave }: { ready: boolean; onReady: () => void; onStart: () => void; onLeave: () => void }) {
   const avatarStyles = [styles.avatar0, styles.avatar1, styles.avatar2, styles.avatar3];
   return <SafeAreaView style={styles.darkSafe}><ScrollView contentContainerStyle={styles.darkPage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><Pressable accessibilityLabel="离开房间" onPress={onLeave}><Text style={styles.leave}>离开</Text></Pressable></View><Text style={styles.roomCode}>ROOM · MINT 02</Text><Text style={styles.darkDisplay}>等待同伴入座</Text><Text style={styles.darkMuted}>每个人准备好后，就可以开始今天的对话。</Text>
     <View style={styles.seatGrid}>{seats.map((seat, index) => <View key={seat.name} style={[styles.seat, index === 0 && styles.occupiedSeat]}><View style={[styles.avatar, avatarStyles[index]]}><Text style={styles.avatarText}>{seat.name.slice(0, 1)}</Text></View><Text style={styles.seatName}>{seat.name}</Text><Text style={styles.seatStatus}>{index === 0 && ready ? "已准备" : seat.status}</Text></View>)}</View>
@@ -107,7 +114,7 @@ function Waiting({ ready, onReady, onStart, onLeave }: { ready: boolean; onReady
   </ScrollView></SafeAreaView>;
 }
 
-function Live({ onEnd }: { onEnd: () => void }) {
+export function LegacyLive({ onEnd }: { onEnd: () => void }) {
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(true);
   return <SafeAreaView style={styles.darkSafe}><View style={styles.livePage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><View style={styles.network}><View style={styles.networkDot} /><Text style={styles.networkText}>网络良好</Text></View></View><Text style={styles.roomCode}>午夜咖啡馆 · 08:42</Text><Text style={styles.darkDisplay}>正在练习</Text><Text style={styles.darkMuted}>轮到 Mint 分享一个让你微笑的瞬间</Text>
@@ -118,7 +125,7 @@ function Live({ onEnd }: { onEnd: () => void }) {
 
 function Control({ label, icon, danger, onPress }: { label: string; icon: string; danger?: boolean; onPress: () => void }) { return <Pressable accessibilityLabel={label} onPress={onPress} style={styles.control} testID={label === "结束房间" ? "end-room-button" : undefined}><View style={[styles.controlIcon, danger && styles.dangerIcon]}><Text style={styles.controlIconText}>{icon}</Text></View><Text style={styles.controlLabel}>{label}</Text></Pressable>; }
 
-function Report({ onRetry, onDone }: { onRetry: () => void; onDone: () => void }) {
+export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone: () => void }) {
   const [retried, setRetried] = useState(false);
   const rows = [["MINT", "表达流畅", "88", "done"], ["AVA", "正在分析语音", "处理中", "processing"], ["NOAH", "等待音频上传", "等待中", "waiting"], ["LUNA", retried ? "已重新提交" : "评分暂时失败", retried ? "处理中" : "重试", retried ? "processing" : "failed"]] as const;
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
@@ -129,12 +136,12 @@ export function RoomApp() {
   const auth = () => dispatch({ type: "authenticated", player: { id: "guest-mint", nickname: "Mint" } });
   const join = () => dispatch({ type: "roomJoined", room: { id: "room-mint", code: "MINT02", title: "午夜咖啡馆" } });
   const pages: Record<Screen, React.ReactNode> = {
-    login: <AuthScreen mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
-    register: <AuthScreen mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
-    lobby: <Lobby onCreate={join} onJoin={join} />,
-    waiting: <Waiting ready={state.ready} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={() => dispatch({ type: "readyChanged", ready: !state.ready })} onStart={() => dispatch({ type: "roomStarted" })} />,
-    live: <Live onEnd={() => dispatch({ type: "roomEnded" })} />,
-    report: <Report onDone={() => dispatch({ type: "leaveRoom" })} onRetry={() => undefined} />,
+    login: <VisualAuthScreen mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
+    register: <VisualAuthScreen mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
+    lobby: <LobbyScreen onCreate={join} onJoin={join} />,
+    waiting: <WaitingScreen ready={state.ready} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={() => dispatch({ type: "readyChanged", ready: !state.ready })} onStart={() => dispatch({ type: "roomStarted" })} />,
+    live: <LiveScreen onEnd={() => dispatch({ type: "roomEnded" })} />,
+    report: <ReportScreen onDone={() => dispatch({ type: "leaveRoom" })} onRetry={() => undefined} />,
   };
   return <>{pages[state.screen]}</>;
 }
