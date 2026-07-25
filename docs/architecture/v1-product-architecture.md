@@ -29,7 +29,7 @@ V1 需要在短周期内形成可录屏的完整闭环，同时保留替换内�
 | Demo 存储 | 内存 Repository + 本地任务运行器 | 缩短开发时间，但接口允许替换 |
 | 仓库边界 | 公开 App + 私有 API + 私有运营平台 | 最终只交付 App，保护后端实现和管理能力 |
 | 正式包观测 | Sentry + 第一方业务事件 | 同时关联业务表现与真实用户故障 |
-| 运营入口 | 独立内部 App 变体 | 使用编译期和分发渠道隔离，不依赖隐藏入口 |
+| 运营入口 | 内部构建中的通用 WebView 容器 + 私有运营 URL | App 只负责入口和会话交接，运营页面源码不进入 App Bundle |
 
 ### 2.1 仓库与交付边界
 
@@ -48,7 +48,7 @@ maowulin/english-room-backend  Private
 
 maowulin/english-room-op       Private
   React Web 运营管理站
-  内部 App 变体入口和构建配置
+  运营站部署配置和 WebView 对接约定
   DAU、增长、留存和转化看板
   错误、Replay 和受控调试工具
 ```
@@ -66,11 +66,20 @@ maowulin/english-room-op       Private
 | 变体 | 分发 | 包含内容 | 明确排除 |
 | --- | --- | --- | --- |
 | `production` | App Store / Play Store | 产品页面、Sentry、业务事件上报 | 运营入口、管理 UI、管理 Token |
-| `internal-ops` | Ad Hoc、TestFlight 内测或企业分发 | 产品页面、管理员登录、运营平台入口 | 长期有效凭证 |
+| `internal-ops` | Ad Hoc、TestFlight 内测或企业分发 | 产品页面、管理员登录、通用 WebView 容器 | 运营页面源码、长期有效凭证 |
 
-两个变体使用不同的 Bundle Identifier/Application ID。私有运营仓库检出指定版本的公开 App，在构建期叠加内部入口和配置；因此公开 App 仓库和正式生产 Bundle 都不包含运营实现。
+两个变体使用不同的 Bundle Identifier/Application ID。MVP 由公开 App 提供通用 WebView 容器，私有运营仓库只部署运营 Web 并提供白名单 HTTPS URL；因此公开 App 仓库和 App Bundle 都不包含运营页面实现。
 
-内部入口不能作为安全边界。即使拿到内部包，用户仍必须经过管理员认证和服务端 RBAC 校验。
+App 负责入口体验和登录态传递，但不能作为唯一安全边界。即使拿到内部包，用户仍必须经过管理员认证和 FastAPI 服务端的 RBAC 校验。
+
+### 2.3 MVP WebView 约定
+
+- App 只实现通用 `OpsWebViewScreen`，不内置运营看板、Sentry 查询页或调试实现。
+- 运营 URL 来自内部构建环境配置，必须使用 HTTPS，并限制在明确的域名白名单内。
+- FastAPI 在管理员认证后签发短有效期、单用途的 `ops_handoff_code`；App 只把该交接码传给 WebView。
+- 运营 Web 用交接码换取 `HttpOnly`、`Secure`、`SameSite` 会话 Cookie。URL、App 配置和 WebView 均不得携带长期 Token、Sentry 管理 Token 或腾讯云密钥。
+- WebView 阻止跳转到白名单外域名，原生桥接和 `postMessage` 只保留 MVP 必需能力。
+- MVP 不实现“加密 URL”。如果解密密钥随 App 发布，逆向后仍可恢复；实际安全边界是 HTTPS、一次性交接码、服务端会话、RBAC 和审计。
 
 ## 3. 系统边界
 
@@ -695,14 +704,14 @@ Sentry Application Metrics 和 Explore 用于 DAU、增长、功能采用率、�
 
 ### 17.4 运营平台边界
 
-运营 Web 只调用 FastAPI 的 `/admin/v1/*` API，不直接持有 Sentry 管理 Token。FastAPI 使用服务端凭证查询 Sentry，并把最小必要的错误摘要、受影响用户数和 Replay 跳转信息返回运营平台。
+运营 Web 由内部 App 的 WebView 加载，只调用 FastAPI 的 `/admin/v1/*` API，不直接持有 Sentry 管理 Token。FastAPI 使用服务端凭证查询 Sentry，并把最小必要的错误摘要、受影响用户数和 Replay 跳转信息返回运营平台。
 
 管理员访问流程：
 
-1. 内部 App 打开管理员登录。
-2. FastAPI 完成账号、MFA 和设备策略校验。
-3. 服务端签发短有效期、单用途的运营会话交换码。
-4. 运营 Web 用交换码换取 `HttpOnly` 会话 Cookie。
+1. 内部 App 打开管理员入口，FastAPI 完成账号、MFA 和设备策略校验。
+2. FastAPI 签发短有效期、单用途的 `ops_handoff_code`。
+3. App 在白名单 HTTPS URL 中打开 WebView，并传入交接码。
+4. 运营 Web 用交接码换取 `HttpOnly` 会话 Cookie。
 5. 所有管理操作再次执行 RBAC、审计日志和幂等校验。
 
 V1 运营能力包括：

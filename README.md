@@ -17,7 +17,7 @@
 - 客户端：React Native Expo
 - 客户端运行方式：Expo Development Build
 - 后端：Python FastAPI
-- 运营平台：React Web 管理站 + 内部 App 构建入口
+- 运营平台：React Web 管理站，通过 App 的通用 WebView 容器加载
 - 监控与基础业务分析：Sentry
 - 长期留存分析：FastAPI 第一方业务事件
 - 实时音频：腾讯云 TRTC
@@ -29,9 +29,9 @@
 | --- | --- | --- | --- |
 | `english-room` | Public | Expo App、公开 API 合约、Fake 适配器和交付文档 | 是 |
 | `english-room-backend` | Private | FastAPI、房间控制面、RTC/评分编排、业务事件和管理 API | 否 |
-| `english-room-op` | Private | 运营 Web、内部 App 构建入口和管理工具 | 否 |
+| `english-room-op` | Private | 运营 Web、WebView 对接和管理工具 | 否 |
 
-正式 App 包含 Sentry SDK 和业务埋点，但不包含运营页面、管理 Token 或 Sentry 查询凭证。内部运营包使用独立 Bundle Identifier/Application ID，仅通过内部分发渠道安装。
+正式 App 包含 Sentry SDK 和业务埋点，但不包含运营页面、管理 Token 或 Sentry 查询凭证。MVP 的内部运营入口只提供通用 WebView 容器；运营页面源码通过白名单 HTTPS URL 加载，不进入 App Bundle。
 
 当前仓库中的 `apps/api/` 是分仓前的基础框架迁移来源。后端迁移验证完成后，再用独立提交从公开仓库移除。
 
