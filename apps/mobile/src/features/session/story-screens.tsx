@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import type { ReportItem } from "@/services/room-client";
 
 const players = [
   ["林舟", "已准备", "#213C38"],
@@ -45,11 +46,10 @@ export function LiveScreen({ onEnd }: { onEnd: () => void }) {
 
 function Control({ label, icon, danger, onPress, testID }: { label: string; icon: string; danger?: boolean; onPress: () => void; testID?: string }) { return <Pressable accessibilityLabel={label} onPress={onPress} style={styles.control} testID={testID}><View style={[styles.controlCircle, danger && styles.hangup]}><Text style={styles.controlIcon}>{icon}</Text></View><Text style={[styles.controlText, danger && styles.dangerText]}>{label === "触发重连" ? "更多" : label}</Text></Pressable>; }
 
-export function ReportScreen({ onDone, onRetry }: { onDone: () => void; onRetry: () => void }) {
-  const [retried, setRetried] = useState(false);
-  const reports = [["林舟", "评分完成", "86", "✓"], ["Mia", "处理中 预计 20 秒", "—", "◌"], ["Alex", "等待评分", "—", "◷"], ["苏晴", retried ? "处理中" : "评分失败", "—", retried ? "◌" : "↻"]];
+export function ReportScreen({ error, items, onDone, onRetry }: { error?: string; items: ReportItem[]; onDone: () => void; onRetry: (item: ReportItem) => void }) {
+  const reports = items;
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.report}><View style={styles.reportHeader}><Text style={styles.back}>‹</Text><View><Text style={styles.reportTitle}>本局英语报告</Text><Text style={styles.legacyReport}>本局口语报告</Text></View><View /></View><Text style={styles.reportSub}>⌁  雾港疑云 · 25 分钟  ⌁</Text><View style={styles.infoCard}><View style={styles.infoImage}/><View><Text style={styles.infoName}>雾港疑云</Text><Text style={styles.infoMeta}>♧ 4 人房间　◷ 25 分钟　▣ 2025/05/18</Text></View></View>
-    <View style={styles.scoreCard}><View style={styles.scoreCircle}><Text style={styles.scoreNumber}>86</Text></View><View><Text style={styles.scoreFor}>林舟的口语评分</Text><Text style={styles.excellent}>表现优秀</Text><Text style={styles.scoreDetails}>♩ 发言 12 次　 ◷ 英语时长 08:36</Text></View></View><View style={styles.metrics}>{[["发音","88"],["流利度","82"],["完整度","90"],["词汇","84"]].map(([label, score]) => <View key={label} style={styles.metric}><Text>{label}</Text><Text style={styles.metricScore}>{score}</Text><View style={styles.metricBar}/></View>)}</View><View style={styles.tip}><Text style={styles.tipIcon}>☀</Text><View><Text style={styles.tipTitle}>改进建议</Text><Text>减少长停顿，让线索表达更连贯。</Text></View></View><Text style={styles.resultTitle}>玩家结果</Text>{reports.map(([name, state, score, icon], index) => <View key={name} style={styles.reportRow}><View style={styles.resultAvatar}><Text>{index + 1}</Text></View><Text style={styles.resultName}>{name}</Text><Text style={[styles.resultState, index === 3 && !retried && styles.failed]}>{icon}　{state}</Text>{index === 3 && !retried ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重新提交</Text></Pressable> : <Text style={styles.resultScore}>{score}</Text>}</View>)}<Pressable accessibilityLabel="回到大厅" onPress={onDone} style={styles.return}><Text style={styles.returnText}>返回大厅</Text></Pressable></ScrollView></SafeAreaView>;
+    <View style={styles.scoreCard}><View style={styles.scoreCircle}><Text style={styles.scoreNumber}>{reports[0]?.score ?? "—"}</Text></View><View><Text style={styles.scoreFor}>本局口语评分</Text><Text style={styles.excellent}>表现优秀</Text></View></View>{error ? <Text accessibilityLabel="报告错误">{error}</Text> : null}<Text style={styles.resultTitle}>玩家结果</Text>{reports.map((item, index) => <View key={item.scoreJobId} style={styles.reportRow}><View style={styles.resultAvatar}><Text>{index + 1}</Text></View><Text style={styles.resultName}>{item.playerName}</Text><Text style={styles.resultState}>{item.status}</Text>{item.status === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => onRetry(item)}><Text style={styles.retry}>重新提交</Text></Pressable> : <Text style={styles.resultScore}>{item.score ?? "—"}</Text>}</View>)}<Pressable accessibilityLabel="回到大厅" onPress={onDone} style={styles.return}><Text style={styles.returnText}>返回大厅</Text></Pressable></ScrollView></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({

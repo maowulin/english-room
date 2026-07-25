@@ -18,7 +18,7 @@ import {
   WaitingScreen,
 } from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
-import { FakeRoomClient, HttpRoomClient, type RoomClient } from "@/services/room-client";
+import { FakeRoomClient, HttpRoomClient, type RoomClient, type ReportItem } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
 
 const seats = [
@@ -138,19 +138,22 @@ export function RoomApp({ client: injectedClient }: { client?: RoomClient }) {
   const client = useRef<RoomClient>(injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
   const [fallback, setFallback] = useState(false);
   const [apiError, setApiError] = useState<string>();
+  const [reportItems, setReportItems] = useState<ReportItem[]>([]);
+  const [reportError, setReportError] = useState<string>();
   const auth = () => { void client.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })).catch((error: unknown) => { const message = error instanceof Error ? error.message : String(error); console.error("English Room API login failed:", message); setApiError(message); }); };
   const join = () => { void client.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })); }); };
   const roomId = state.room?.id;
   const ready = () => { if (roomId) void client.setReady(roomId, !state.ready).catch(() => undefined).finally(() => dispatch({ type: "readyChanged", ready: !state.ready })); };
   const start = () => { if (roomId) void client.startRoom(roomId).catch(() => undefined).finally(() => dispatch({ type: "roomStarted" })); };
-  const end = () => { if (roomId) void client.endRoom(roomId).catch(() => undefined).finally(() => dispatch({ type: "roomEnded" })); };
+  const end = () => { if (roomId) void client.endRoom(roomId).then(() => client.getRoomReport(roomId)).then((report) => { setReportItems(report.items); dispatch({ type: "roomEnded" }); }).catch(() => { setReportError("报告加载失败，请重试"); dispatch({ type: "roomEnded" }); }); };
+  const retry = (item: ReportItem) => { void client.retryScoreJob(item.scoreJobId).then((next) => setReportItems((items) => items.map((current) => current.scoreJobId === next.scoreJobId ? next : current))).catch(() => setReportError("报告加载失败，请重试")); };
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
     register: <VisualAuthScreen mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
     lobby: <LobbyScreen onCreate={join} onJoin={join} />,
     waiting: <WaitingScreen ready={state.ready} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
     live: <LiveScreen onEnd={end} />,
-    report: <ReportScreen onDone={() => dispatch({ type: "leaveRoom" })} onRetry={() => undefined} />,
+    report: <ReportScreen error={reportError} items={reportItems} onDone={() => dispatch({ type: "leaveRoom" })} onRetry={retry} />,
   };
   return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{fallback ? <Text accessibilityLabel="开发 fallback">开发模式：已切换 Fake 服务</Text> : null}{pages[state.screen]}</>;
 }
