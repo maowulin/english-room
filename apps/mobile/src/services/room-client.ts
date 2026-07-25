@@ -183,8 +183,10 @@ export class HttpRoomClient implements RoomClient {
     const job = await this.request(`/v1/score-jobs/${scoreJobId}/retry`, { method: "POST" }) as { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number> };
     return this.mapReportItem(job);
   }
-  private mapReportItem(job: { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number>; recognized_text?: string }): ReportItem {
-    return { playerName: job.player_id, scoreJobId: job.score_job_id, status: job.status, score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text };
+  private mapReportItem(job: { score_job_id: string; player_id: string; status: string; scores?: Record<string, number>; recognized_text?: string }): ReportItem {
+    const status = job.status === "success" ? "completed" : job.status;
+    if (!["completed", "processing", "waiting", "failed"].includes(status)) throw new Error(`未知评分状态：${job.status}`);
+    return { playerName: job.player_id, scoreJobId: job.score_job_id, status: status as ReportItem["status"], score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text };
   }
   private async versioned(roomId: string, method: "POST" | "PUT", suffix: string): Promise<Room> {
     return this.mapRoom(await this.request(`/v1/rooms/${roomId}${suffix}`, { method, body: JSON.stringify({ room_version: this.versions.get(roomId) ?? 1 }) }) as RoomSnapshot);
