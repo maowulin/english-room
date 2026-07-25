@@ -44,4 +44,16 @@ describe("RoomApp", () => {
 
     expect(await liveView.findByText("重新连接中")).toBeTruthy();
   });
+
+  it("keeps the lobby tab bar and report exit control reachable", async () => {
+    const view = await render(<RoomApp />);
+    await act(async () => fireEvent.press(view.getByTestId("login-button")));
+    expect(await view.findByTestId("lobby-bottom-tabs")).toBeTruthy();
+
+    await act(async () => fireEvent.press(view.getByTestId("create-room-button")));
+    await act(async () => fireEvent.press(view.getByTestId("ready-button")));
+    await act(async () => fireEvent.press(view.getByTestId("start-room-button")));
+    await act(async () => fireEvent.press(view.getByTestId("end-room-button")));
+    expect(await view.findByLabelText("回到大厅")).toBeTruthy();
+  });
 });
