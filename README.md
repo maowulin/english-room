@@ -25,8 +25,53 @@
 - [架构讨论记录](./docs/discussions/2026-07-25-architecture-notes.md)
 - [需求解读](./docs/requirements/assessment-brief.md)
 - [基础框架架构](./docs/architecture/foundation.md)
+- [基础框架验证记录](./docs/validation/2026-07-25-foundation.md)
 - [原始题目副本说明](./docs/source/README.md)
 
-## 项目状态
+## 本地运行
 
-当前正在搭建可运行的基础框架。
+### 启动 FastAPI
+
+```bash
+cd apps/api
+uv sync --dev
+uv run uvicorn english_room_api.app:app --host 0.0.0.0 --port 8000
+```
+
+验证健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### 启动 Expo Development Build
+
+首次安装依赖并生成原生开发构建：
+
+```bash
+cd apps/mobile
+npm ci
+npm run ios -- --device "iPhone 16 Pro" --no-bundler
+```
+
+随后设置 Mac 的局域网 IP 并启动 Metro。真机访问 FastAPI 时也使用该地址：
+
+```bash
+export ENGLISH_ROOM_DEV_HOST=192.168.3.63
+
+EXPO_PUBLIC_API_BASE_URL="http://${ENGLISH_ROOM_DEV_HOST}:8000" \
+REACT_NATIVE_PACKAGER_HOSTNAME="${ENGLISH_ROOM_DEV_HOST}" \
+npx expo start --dev-client --lan
+```
+
+请将示例 IP 替换为当前 Mac 的实际局域网 IP。若只使用 iOS 模拟器，FastAPI 地址也可使用默认值 `http://127.0.0.1:8000`。
+
+## 当前状态
+
+基础框架已完成：
+
+- FastAPI 健康检查和后续鉴权、房间、评分模块边界已建立。
+- Expo Development Build 已在 iOS 模拟器原生构建并打开 Demo 页面。
+- 设备端冒烟测试已确认 FastAPI 在线状态和 TRTC 待接入状态。
+
+下一阶段优先接入 TRTC，并验证两名玩家同时进入房间的实时语音链路。
