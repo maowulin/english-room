@@ -26,6 +26,7 @@
 - [需求解读](./docs/requirements/assessment-brief.md)
 - [页面设计图](./docs/design/README.md)
 - [基础框架架构](./docs/architecture/foundation.md)
+- [V1 前后端架构](./docs/architecture/v1-product-architecture.md)
 - [基础框架验证记录](./docs/validation/2026-07-25-foundation.md)
 - [原始题目副本说明](./docs/source/README.md)
 
