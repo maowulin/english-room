@@ -2,7 +2,7 @@
 
 日期：2026-07-25
 
-状态：待用户审查
+状态：三仓与运营方向已确认，待迁移实施
 
 ## 1. 设计目标
 
@@ -27,6 +27,50 @@ V1 需要在短周期内形成可录屏的完整闭环，同时保留替换内�
 | 玩家音频 | TRTC 纯音频单流录制 | 每位玩家生成独立音频，避免评分错配 |
 | 评分执行 | FastAPI 异步任务调用口语评测 | 密钥不下发客户端，集中处理重试和聚合 |
 | Demo 存储 | 内存 Repository + 本地任务运行器 | 缩短开发时间，但接口允许替换 |
+| 仓库边界 | 公开 App + 私有 API + 私有运营平台 | 最终只交付 App，保护后端实现和管理能力 |
+| 正式包观测 | Sentry + 第一方业务事件 | 同时关联业务表现与真实用户故障 |
+| 运营入口 | 独立内部 App 变体 | 使用编译期和分发渠道隔离，不依赖隐藏入口 |
+
+### 2.1 仓库与交付边界
+
+```text
+maowulin/english-room          Public
+  React Native Expo App
+  公开 API 合约和生成客户端
+  FakeApiClient / FakeRtcClient
+  页面设计、交付文档和运行说明
+
+maowulin/english-room-backend  Private
+  FastAPI 业务控制面
+  房间、RTC、录制和评分编排
+  第一方业务事件与指标聚合
+  运营管理 API 和 Sentry 服务端代理
+
+maowulin/english-room-op       Private
+  React Web 运营管理站
+  内部 App 变体入口和构建配置
+  DAU、增长、留存和转化看板
+  错误、Replay 和受控调试工具
+```
+
+只有 `english-room` 是候选人交付物。它必须在没有私有仓库权限时仍能使用 Fake 适配器运行完整页面闭环；连接真实服务时只依赖公开 API 合约和环境配置。
+
+仓库之间不增加第四个共享代码仓。FastAPI 的 OpenAPI 是接口真相源：
+
+1. 后端生成经过审查的 `openapi.json`。
+2. App 和运营平台各自生成并提交类型安全客户端。
+3. API 不兼容变更通过版本路径和生成客户端差异显式暴露。
+
+### 2.2 正式包与内部运营包
+
+| 变体 | 分发 | 包含内容 | 明确排除 |
+| --- | --- | --- | --- |
+| `production` | App Store / Play Store | 产品页面、Sentry、业务事件上报 | 运营入口、管理 UI、管理 Token |
+| `internal-ops` | Ad Hoc、TestFlight 内测或企业分发 | 产品页面、管理员登录、运营平台入口 | 长期有效凭证 |
+
+两个变体使用不同的 Bundle Identifier/Application ID。私有运营仓库检出指定版本的公开 App，在构建期叠加内部入口和配置；因此公开 App 仓库和正式生产 Bundle 都不包含运营实现。
+
+内部入口不能作为安全边界。即使拿到内部包，用户仍必须经过管理员认证和服务端 RBAC 校验。
 
 ## 3. 系统边界
 
@@ -585,3 +629,103 @@ V1 不引入以下能力：
 - 评分指标能说明哪些来自腾讯云，哪些由业务计算。
 - Demo 组件都有 Fake 实现，真实云服务不可用时仍可开发和测试。
 - 从 Demo 内存实现升级到数据库、Redis 和任务队列时不需要重写页面。
+- App、后端和运营平台分别位于 Public、Private、Private 仓库。
+- 正式 App Bundle 不包含运营路由、管理页面或管理凭证。
+- 只获取公开 App 仓库的评审者可以运行 Fake 完整闭环。
+
+## 17. 长线运营架构
+
+### 17.1 数据流
+
+```mermaid
+flowchart LR
+    App["正式 Expo App"]
+    Sentry["Sentry"]
+    API["FastAPI"]
+    Events["第一方业务事件"]
+    Aggregate["指标聚合任务"]
+    OpsAPI["运营管理 API"]
+    Ops["私有运营 Web"]
+    Internal["内部 App 变体"]
+
+    App -->|"错误、Trace、Replay、业务指标"| Sentry
+    App -->|"关键业务事件"| API
+    API --> Events
+    Events --> Aggregate
+    Aggregate --> OpsAPI
+    Sentry -->|"服务端 Token 查询"| OpsAPI
+    Internal -->|"管理员认证后打开"| Ops
+    Ops -->|"短期管理员会话"| OpsAPI
+```
+
+App 中的 `AnalyticsClient` 定义统一事件协议，并将数据发送到两个 Sink：
+
+- `SentryAnalyticsSink`：错误、性能、Replay、功能采用率和近实时转化。
+- `FirstPartyAnalyticsSink`：影响 DAU、留存、漏斗和核心业务判断的稳定事件。
+
+双路采集不是两套事件命名。事件名称、属性、隐私等级和版本只在一份事件目录中定义。
+
+### 17.2 V1 事件目录
+
+| 事件 | 触发时机 | 主要指标 |
+| --- | --- | --- |
+| `app_active` | App 进入前台并建立有效会话 | DAU、DAU 增长率 |
+| `sign_in_completed` | 玩家登录成功 | 登录转化率 |
+| `room_created` | 房间创建成功 | 创建采用率 |
+| `room_joined` | 成员成为业务房间成员 | 入房转化率 |
+| `rtc_join_succeeded` | TRTC 成功入房 | 媒体链路成功率 |
+| `room_started` | 房间进入 `live` | 开局转化率 |
+| `room_completed` | 房间进入终态 | 完赛率 |
+| `score_viewed` | 玩家看到自己的评分 | 评分查看率 |
+
+所有事件都携带 `event_id`、伪匿名 `user_id`、`occurred_at`、`app_version`、`platform` 和 `environment`。房间事件可携带 `room_id`，但不得把音频、转写文本、邮箱、手机号或完整访问令牌发送到 Sentry。
+
+### 17.3 指标口径
+
+```text
+DAU = 当日触发 app_active 的唯一 user_id 数
+DAU 增长率 = (当日 DAU - 前日 DAU) / 前日 DAU
+入房转化率 = 唯一 room_joined 用户 / 唯一 app_active 用户
+完赛率 = 唯一 room_completed 用户 / 唯一 room_joined 用户
+评分查看率 = 唯一 score_viewed 用户 / 唯一 room_completed 用户
+D1 留存 = 首次活跃后第 1 日再次活跃用户 / 对应新增用户
+```
+
+Sentry Application Metrics 和 Explore 用于 DAU、增长、功能采用率、近实时转化以及与错误、Trace、Replay 的关联。跨 Session 的 D1、D7、D30 留存和长期行为 Cohort 由 FastAPI 的第一方事件表计算。
+
+### 17.4 运营平台边界
+
+运营 Web 只调用 FastAPI 的 `/admin/v1/*` API，不直接持有 Sentry 管理 Token。FastAPI 使用服务端凭证查询 Sentry，并把最小必要的错误摘要、受影响用户数和 Replay 跳转信息返回运营平台。
+
+管理员访问流程：
+
+1. 内部 App 打开管理员登录。
+2. FastAPI 完成账号、MFA 和设备策略校验。
+3. 服务端签发短有效期、单用途的运营会话交换码。
+4. 运营 Web 用交换码换取 `HttpOnly` 会话 Cookie。
+5. 所有管理操作再次执行 RBAC、审计日志和幂等校验。
+
+V1 运营能力包括：
+
+- DAU、DAU 增长率、D1/D7 留存和核心转化漏斗。
+- 按 App 版本、平台和环境筛选。
+- 查看 Sentry Issue、受影响用户、版本分布和 Replay 跳转。
+- 查看房间、录制、评分任务状态并重试允许重试的失败任务。
+- 查看所有管理员操作审计记录。
+
+运营平台不提供任意 SQL、任意后端命令或直接修改用户数据的能力。
+
+### 17.5 隐私与成本
+
+- Sentry Replay 默认遮罩文本、图片和向量内容，仅对错误会话提高采样率。
+- 用户身份使用稳定伪匿名 ID；PII 只保存在明确授权的业务系统。
+- 关键业务事件先写入 FastAPI，客户端离线时按数量和时长上限缓冲。
+- Sentry 指标和 Replay 采样率按环境分别配置，避免 Demo 配置直接进入生产。
+- 生产、预发布和内部运营数据使用不同 `environment`，管理看板默认只读生产环境。
+
+### 17.6 设计依据
+
+- [Expo：安装多个 App 变体](https://docs.expo.dev/build-reference/variants/)
+- [Expo：创建内部分发构建](https://docs.expo.dev/tutorial/eas/internal-distribution-builds/)
+- [Sentry：Application Metrics](https://sentry.io/product/metrics/)
+- [Sentry：业务分析能力与跨 Session 分析边界](https://blog.sentry.io/product-analytics-you-already-have/)

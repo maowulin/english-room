@@ -176,5 +176,5 @@ def test_health_returns_service_status() -> None:
 - [ ] 检查 Git 工作区和提交边界。
 - [ ] 扫描 `.env`、密钥、令牌和 `UserSig`。
 - [ ] 调用 external-brain 审查 diff、验证结果和剩余风险。
-- [ ] 确认 GitHub 目标是 `maowulin/english-room-demo` 且可见性为 `PUBLIC`。
+- [ ] 确认 GitHub 目标是 `maowulin/english-room` 且可见性为 `PUBLIC`。
 - [ ] 只有在个人远端实际存在并可访问时才推送 `main`。

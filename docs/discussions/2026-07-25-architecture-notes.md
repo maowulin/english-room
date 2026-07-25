@@ -2,7 +2,7 @@
 
 日期：2026-07-25
 
-状态：基础框架方案已确认，TRTC 与评分细节待验证
+状态：三仓架构已确认，TRTC 与评分细节待验证
 
 ## 题目目标
 
@@ -72,3 +72,15 @@
 - 确认 Expo 使用 Development Build/CNG，以支持后续 TRTC 原生模块。
 - Demo 阶段使用单实例内存房间状态，通过接口隔离为后续 Redis 替换保留边界。
 - 基础框架已在 iOS 模拟器完成原生构建，并打开可连接 FastAPI 的 Demo 页面。
+
+### 2026-07-25：交付与运营架构更新
+
+- 早期 Monorepo 决策只用于快速搭建基础框架，现被三仓架构取代。
+- `english-room` 作为公开 App 仓库，也是候选人最终交付物。
+- `english-room-backend` 作为私有 FastAPI 后端仓库，不随候选人交付。
+- `english-room-op` 作为私有运营平台仓库，不随候选人交付。
+- 正式 App 保留 Sentry、业务埋点和第一方事件上报能力。
+- 运营页面、管理员权限、Sentry 查询 Token 和调试操作不进入正式 App。
+- 内部运营包使用独立 App 变体和内部分发渠道，不把特殊入口隐藏在正式包中。
+- Sentry 负责错误、性能、Session Replay、DAU、增长和核心转化指标。
+- FastAPI 保存关键业务事件，用于精确计算 D1、D7、D30 留存和跨 Session 漏斗。

@@ -1,5 +1,7 @@
 # 基础框架架构设计
 
+> 本文记录分仓前已经完成的基础框架。目标仓库边界已调整为公开 App、私有 FastAPI 后端和私有运营平台，最新决策以 [V1 前后端架构](./v1-product-architecture.md) 为准。
+
 ## 设计目标
 
 基础框架首先证明两个能力：
@@ -26,10 +28,10 @@ flowchart LR
 
 业务后端属于控制面，只处理身份、房间生命周期、状态同步和任务编排。TRTC 属于媒体面，直接承载客户端之间的实时音频。
 
-## 仓库结构
+## 初始仓库结构
 
 ```text
-english-room-demo/
+english-room/
 ├── apps/
 │   ├── mobile/                   # React Native Expo 客户端
 │   └── api/                      # Python FastAPI 后端
@@ -43,7 +45,7 @@ english-room-demo/
 └── README.md
 ```
 
-不引入 JavaScript Monorepo 编排器。客户端和后端分别管理依赖，根目录只提供统一验证入口和文档。
+该结构用于先验证 Expo 与 FastAPI 可以独立启动，不再作为最终交付结构。后端会迁移到 `english-room-backend` 私有仓库；本仓库只保留 App、公开契约、Fake 适配器和交付文档。
 
 ## 客户端边界
 

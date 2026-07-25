@@ -2,7 +2,7 @@
 
 一个面向候选人实作题的多人英语实时语音房间 Demo。
 
-项目使用 React Native Expo 构建客户端，并使用 Python FastAPI 提供后端 API。
+本仓库是公开交付的 React Native Expo 客户端。私有 FastAPI 后端和私有运营平台分别维护在独立仓库。
 
 ## 当前目标
 
@@ -17,8 +17,23 @@
 - 客户端：React Native Expo
 - 客户端运行方式：Expo Development Build
 - 后端：Python FastAPI
+- 运营平台：React Web 管理站 + 内部 App 构建入口
+- 监控与基础业务分析：Sentry
+- 长期留存分析：FastAPI 第一方业务事件
 - 实时音频：腾讯云 TRTC
 - 口语评分：腾讯云口语评测（新版）
+
+## 三仓边界
+
+| 仓库 | 可见性 | 职责 | 是否交付 |
+| --- | --- | --- | --- |
+| `english-room` | Public | Expo App、公开 API 合约、Fake 适配器和交付文档 | 是 |
+| `english-room-backend` | Private | FastAPI、房间控制面、RTC/评分编排、业务事件和管理 API | 否 |
+| `english-room-op` | Private | 运营 Web、内部 App 构建入口和管理工具 | 否 |
+
+正式 App 包含 Sentry SDK 和业务埋点，但不包含运营页面、管理 Token 或 Sentry 查询凭证。内部运营包使用独立 Bundle Identifier/Application ID，仅通过内部分发渠道安装。
+
+当前仓库中的 `apps/api/` 是分仓前的基础框架迁移来源。后端迁移验证完成后，再用独立提交从公开仓库移除。
 
 ## 文档
 
