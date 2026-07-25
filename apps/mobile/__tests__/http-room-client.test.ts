@@ -1,6 +1,16 @@
 import { HttpRoomClient } from "@/services/room-client";
 
 describe("HttpRoomClient", () => {
+  it("binds globalThis.fetch when no fetcher is injected", async () => {
+    const original = globalThis.fetch;
+    const fetcher = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ player_id: "p", access_token: "t", profile: { display_name: "Mint" } }) });
+    globalThis.fetch = fetcher as typeof fetch;
+    try {
+      await new HttpRoomClient({ baseUrl: "http://api" }).createGuestSession({ nickname: "Mint" });
+      expect(fetcher).toHaveBeenCalledWith("http://api/v1/guest-sessions", expect.any(Object));
+    } finally { globalThis.fetch = original; }
+  });
+
   it("maps sessions, snapshots, reports and retry requests to the FastAPI contract", async () => {
     const fetcher = jest.fn<Promise<Response>, [RequestInfo | URL]>();
     fetcher

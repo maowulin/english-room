@@ -149,9 +149,11 @@ export class HttpRoomClient implements RoomClient {
   private token?: string;
   private versions = new Map<string, number>();
 
-  constructor({ baseUrl, fetcher = fetch, idGenerator = () => `${Date.now()}-${Math.random()}` }: HttpRoomClientOptions) {
+  constructor({ baseUrl, fetcher, idGenerator = () => `${Date.now()}-${Math.random()}` }: HttpRoomClientOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
-    this.fetcher = fetcher;
+    const runtimeFetch = fetcher ?? globalThis.fetch?.bind(globalThis);
+    if (!runtimeFetch) throw new Error("当前运行环境未提供 globalThis.fetch，无法请求 API");
+    this.fetcher = runtimeFetch;
     this.idGenerator = idGenerator;
   }
 
