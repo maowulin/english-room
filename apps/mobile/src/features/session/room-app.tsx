@@ -1,4 +1,4 @@
-import { useReducer, useState } from "react";
+import { useReducer, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -18,6 +18,7 @@ import {
   WaitingScreen,
 } from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
+import { FakeRoomClient, HttpRoomClient, type RoomClient } from "@/services/room-client";
 
 const seats = [
   { name: "MINT", status: "已就座", tone: "mint" },
@@ -133,17 +134,23 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
 
 export function RoomApp() {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
-  const auth = () => dispatch({ type: "authenticated", player: { id: "guest-mint", nickname: "Mint" } });
-  const join = () => dispatch({ type: "roomJoined", room: { id: "room-mint", code: "MINT02", title: "午夜咖啡馆" } });
+  const client = useRef<RoomClient>(process.env.EXPO_PUBLIC_API_BASE_URL ? new HttpRoomClient({ baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL }) : new FakeRoomClient()).current;
+  const [fallback, setFallback] = useState(false);
+  const auth = () => { void client.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })); }); };
+  const join = () => { void client.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })); }); };
+  const roomId = state.room?.id;
+  const ready = () => { if (roomId) void client.setReady(roomId, !state.ready).finally(() => dispatch({ type: "readyChanged", ready: !state.ready })); };
+  const start = () => { if (roomId) void client.startRoom(roomId).finally(() => dispatch({ type: "roomStarted" })); };
+  const end = () => { if (roomId) void client.endRoom(roomId).finally(() => dispatch({ type: "roomEnded" })); };
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
     register: <VisualAuthScreen mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
     lobby: <LobbyScreen onCreate={join} onJoin={join} />,
-    waiting: <WaitingScreen ready={state.ready} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={() => dispatch({ type: "readyChanged", ready: !state.ready })} onStart={() => dispatch({ type: "roomStarted" })} />,
-    live: <LiveScreen onEnd={() => dispatch({ type: "roomEnded" })} />,
+    waiting: <WaitingScreen ready={state.ready} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
+    live: <LiveScreen onEnd={end} />,
     report: <ReportScreen onDone={() => dispatch({ type: "leaveRoom" })} onRetry={() => undefined} />,
   };
-  return <>{pages[state.screen]}</>;
+  return <>{fallback ? <Text accessibilityLabel="开发 fallback">开发模式：已切换 Fake 服务</Text> : null}{pages[state.screen]}</>;
 }
 
 const styles = StyleSheet.create({
