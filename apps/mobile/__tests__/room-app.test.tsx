@@ -1,10 +1,13 @@
 import { act, fireEvent, render } from "@testing-library/react-native";
 
 import { RoomApp } from "@/app/index";
+import { FakeRoomClient } from "@/services/room-client";
 
 describe("RoomApp", () => {
+  const renderFake = () => render(<RoomApp client={new FakeRoomClient()} />);
+
   it("takes a guest from login to lobby and created waiting room", async () => {
-    const view = await render(<RoomApp />);
+    const view = await renderFake();
 
     await act(async () => fireEvent.changeText(view.getByTestId("email-input"), "mint@example.com"));
     await act(async () => fireEvent.press(view.getByTestId("login-button")));
@@ -16,7 +19,7 @@ describe("RoomApp", () => {
   });
 
   it("lets a ready guest start and end the voice room", async () => {
-    const view = await render(<RoomApp />);
+    const view = await renderFake();
 
     await act(async () => fireEvent.press(view.getByTestId("login-button")));
     await act(async () => fireEvent.press(await view.findByTestId("create-room-button")));
@@ -29,13 +32,13 @@ describe("RoomApp", () => {
   });
 
   it("shows the registration steps and a reconnecting visual state", async () => {
-    const registerView = await render(<RoomApp />);
+    const registerView = await renderFake();
 
     await act(async () => fireEvent.press(registerView.getByLabelText("前往注册")));
     expect(await registerView.findByText("1")).toBeTruthy();
     expect(registerView.getByText("发送验证码")).toBeTruthy();
 
-    const liveView = await render(<RoomApp />);
+    const liveView = await renderFake();
     await act(async () => fireEvent.press(liveView.getByTestId("login-button")));
     await act(async () => fireEvent.press(await liveView.findByTestId("create-room-button")));
     await act(async () => fireEvent.press(liveView.getByTestId("ready-button")));
@@ -46,7 +49,7 @@ describe("RoomApp", () => {
   });
 
   it("keeps the lobby tab bar and report exit control reachable", async () => {
-    const view = await render(<RoomApp />);
+    const view = await renderFake();
     await act(async () => fireEvent.press(view.getByTestId("login-button")));
     expect(await view.findByTestId("lobby-bottom-tabs")).toBeTruthy();
 

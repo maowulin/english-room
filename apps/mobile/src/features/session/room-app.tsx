@@ -133,11 +133,12 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
 }
 
-export function RoomApp() {
+export function RoomApp({ client: injectedClient }: { client?: RoomClient }) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
-  const client = useRef<RoomClient>(new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
+  const client = useRef<RoomClient>(injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
   const [fallback, setFallback] = useState(false);
-  const auth = () => { void client.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })); }); };
+  const [apiError, setApiError] = useState<string>();
+  const auth = () => { void client.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })).catch((error: unknown) => { const message = error instanceof Error ? error.message : String(error); console.error("English Room API login failed:", message); setApiError(message); }); };
   const join = () => { void client.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })); }); };
   const roomId = state.room?.id;
   const ready = () => { if (roomId) void client.setReady(roomId, !state.ready).catch(() => undefined).finally(() => dispatch({ type: "readyChanged", ready: !state.ready })); };
@@ -151,7 +152,7 @@ export function RoomApp() {
     live: <LiveScreen onEnd={end} />,
     report: <ReportScreen onDone={() => dispatch({ type: "leaveRoom" })} onRetry={() => undefined} />,
   };
-  return <>{fallback ? <Text accessibilityLabel="开发 fallback">开发模式：已切换 Fake 服务</Text> : null}{pages[state.screen]}</>;
+  return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{fallback ? <Text accessibilityLabel="开发 fallback">开发模式：已切换 Fake 服务</Text> : null}{pages[state.screen]}</>;
 }
 
 const styles = StyleSheet.create({
