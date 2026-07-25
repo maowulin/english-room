@@ -19,6 +19,7 @@ import {
 } from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 import { FakeRoomClient, HttpRoomClient, type RoomClient } from "@/services/room-client";
+import { resolveApiBaseUrl } from "@/services/api-base-url";
 
 const seats = [
   { name: "MINT", status: "已就座", tone: "mint" },
@@ -134,14 +135,14 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
 
 export function RoomApp() {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
-  const client = useRef<RoomClient>(process.env.EXPO_PUBLIC_API_BASE_URL ? new HttpRoomClient({ baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL }) : new FakeRoomClient()).current;
+  const client = useRef<RoomClient>(new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
   const [fallback, setFallback] = useState(false);
   const auth = () => { void client.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createGuestSession({ nickname: "Mint" }).then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } })); }); };
   const join = () => { void client.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })).catch(() => { setFallback(true); const fake = new FakeRoomClient(); void fake.createRoom({ title: "雾港疑云" }).then((room) => dispatch({ type: "roomJoined", room })); }); };
   const roomId = state.room?.id;
-  const ready = () => { if (roomId) void client.setReady(roomId, !state.ready).finally(() => dispatch({ type: "readyChanged", ready: !state.ready })); };
-  const start = () => { if (roomId) void client.startRoom(roomId).finally(() => dispatch({ type: "roomStarted" })); };
-  const end = () => { if (roomId) void client.endRoom(roomId).finally(() => dispatch({ type: "roomEnded" })); };
+  const ready = () => { if (roomId) void client.setReady(roomId, !state.ready).catch(() => undefined).finally(() => dispatch({ type: "readyChanged", ready: !state.ready })); };
+  const start = () => { if (roomId) void client.startRoom(roomId).catch(() => undefined).finally(() => dispatch({ type: "roomStarted" })); };
+  const end = () => { if (roomId) void client.endRoom(roomId).catch(() => undefined).finally(() => dispatch({ type: "roomEnded" })); };
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
     register: <VisualAuthScreen mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
