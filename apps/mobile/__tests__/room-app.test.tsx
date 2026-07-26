@@ -1,12 +1,61 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 
 import { RoomApp } from "@/app/index";
-import { FakeRoomClient } from "@/services/room-client";
+import { LiveScreen, ReportScreen, type MediaUiState } from "@/features/session/story-screens";
+import { FakeRoomClient, type ReportItem } from "@/services/room-client";
 
 describe("RoomApp", () => {
   afterEach(cleanup);
 
   const renderFake = async () => render(<RoomApp client={new FakeRoomClient()} />);
+  type RoomView = Awaited<ReturnType<typeof render>>;
+
+  const realMediaState = {
+    grant: "ready",
+    mode: "real",
+    network: "good",
+    permission: "granted",
+    recording: "ready",
+    report: "ready",
+    rtc: "joined",
+  } satisfies MediaUiState;
+
+  const renderReal = async (
+    mediaState: Partial<MediaUiState> = {},
+  ) => render(<RoomApp client={new FakeRoomClient()} mediaState={{ ...realMediaState, ...mediaState }} />);
+  const renderRealLive = async (mediaState: Partial<MediaUiState> = {}) => render(<LiveScreen mediaState={{ ...realMediaState, ...mediaState }} onEnd={() => undefined} />);
+  const completedReports: ReportItem[] = [
+    { fluency: 89, playerName: "Mint", pronunciation: 91, score: 90, scoreJobId: "score-1", status: "completed" },
+    { fluency: 87, playerName: "Mia", pronunciation: 88, score: 88, scoreJobId: "score-2", status: "completed" },
+  ];
+
+  const moveToWaiting = async (view: RoomView) => {
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+    await act(async () => {
+      fireEvent.press(await view.findByTestId("create-room-button"));
+    });
+    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+  };
+
+  const moveToLive = async (view: RoomView) => {
+    await moveToWaiting(view);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("ready-button"));
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId("start-room-button"));
+    });
+    expect(await view.findByText("正在练习")).toBeTruthy();
+  };
+
+  const moveToReadyWaiting = async (view: RoomView) => {
+    await moveToWaiting(view);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("ready-button"));
+    });
+  };
 
   it("takes a guest from login to lobby and created waiting room", async () => {
     const view = await renderFake();
@@ -199,5 +248,102 @@ describe("RoomApp", () => {
     expect(await view.findByText("等待同伴入座")).toBeTruthy();
     expect(view.getByLabelText("API 错误")).toBeTruthy();
     expect(view.queryByText("正在练习")).toBeNull();
+  });
+
+  it("separates real media labels and shows denied microphone permission before start", async () => {
+    const view = await renderReal({ grant: "idle", permission: "denied", rtc: "idle" });
+
+    await moveToWaiting(view);
+
+    expect(view.getByText("真实语音模式 · 等待媒体就绪")).toBeTruthy();
+    expect(view.getByText("麦克风权限被拒绝，请在系统设置中开启后重试")).toBeTruthy();
+    expect(view.queryByText("Demo / Fake 控制面 · 语音为 Fake")).toBeNull();
+  });
+
+  it("separates real media labels in the lobby", async () => {
+    const view = await renderReal();
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+
+    expect(await view.findByText("真实语音模式 · TRTC/SOE")).toBeTruthy();
+    expect(view.queryByText("Demo / Fake 控制面 · 非真实 TRTC/SOE")).toBeNull();
+  });
+
+  it.each([
+    { grant: "idle", permission: "denied", rtc: "idle" },
+    { grant: "loading", rtc: "joining" },
+    { rtc: "joining" },
+    { rtc: "reconnecting" },
+  ] satisfies Array<Partial<MediaUiState>>)("keeps real start disabled until media is ready %#", async (mediaState) => {
+    const view = await renderReal(mediaState);
+
+    await moveToReadyWaiting(view);
+
+    expect(view.getByTestId("start-room-button")).toBeDisabled();
+  });
+
+  it.each([
+    [{ grant: "loading", rtc: "joining" }, "正在获取语音凭证", "正在连接语音房间"],
+    [{ rtc: "reconnecting" }, "正在重新连接", "其他人可能暂时听不到你"],
+    [{ network: "weak", rtc: "joined" }, "语音进行中", "网络较弱，建议靠近 Wi-Fi"],
+    [{ rtc: "kicked" }, "你已离开语音房间", "请返回房间重新加入"],
+    [{ rtc: "disconnected" }, "语音已断开", "请检查网络后重试"],
+    [{ rtc: "joinFailed" }, "语音入房失败", "请稍后重试"],
+  ] satisfies Array<[Partial<MediaUiState>, string, string]>)("renders real live media state %# without leaking demo copy", async (mediaState, primary, secondary) => {
+    const view = await renderRealLive(mediaState);
+
+    expect(view.getByText("真实语音模式 · TRTC")).toBeTruthy();
+    expect(view.queryByText("Demo / Fake RTC · 非真实语音")).toBeNull();
+    expect(view.getByText(primary)).toBeTruthy();
+    expect(view.getByText(secondary)).toBeTruthy();
+  });
+
+  it("does not show real voice-in-progress before grant and join succeed", async () => {
+    const view = await renderRealLive({ grant: "loading", rtc: "joining" });
+
+    expect(view.queryByText("语音进行中")).toBeNull();
+    expect(view.getByText("正在获取语音凭证")).toBeTruthy();
+    expect(view.getByText("正在连接语音房间")).toBeTruthy();
+  });
+
+  it.each([
+    { grant: "loading", rtc: "joining" },
+    { grant: "failed" },
+    { rtc: "reconnecting" },
+    { rtc: "joinFailed" },
+  ] satisfies Array<Partial<MediaUiState>>)("keeps real audio controls disabled until media is ready %#", async (mediaState) => {
+    const view = await renderRealLive(mediaState);
+
+    expect(view.getByLabelText("静音")).toBeDisabled();
+    expect(view.getByLabelText("扬声器开")).toBeDisabled();
+  });
+
+  it("shows room processing and waits for all real report scores before success summary", async () => {
+    const view = await renderReal({ recording: "processing", report: "processing" });
+
+    await moveToLive(view);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("end-room-button"));
+    });
+
+    expect(await view.findByText("本局口语报告")).toBeTruthy();
+    expect(view.getByText("录音上传中")).toBeTruthy();
+    expect(view.getByText("报告生成中")).toBeTruthy();
+    expect(view.getByText("等待全员评分完成")).toBeTruthy();
+    expect(view.queryByText("表现优秀")).toBeNull();
+    expect(view.getByText("评分完成")).toBeTruthy();
+    expect(view.getByText("评分处理中")).toBeTruthy();
+    expect(view.getByText("等待音频生成")).toBeTruthy();
+    expect(view.getByText("评分失败")).toBeTruthy();
+  });
+
+  it("does not show real success summary when recording failed even if score jobs completed", async () => {
+    const view = await render(<ReportScreen items={completedReports} mediaState={{ ...realMediaState, recording: "failed", report: "ready" }} onDone={() => undefined} onRetry={() => undefined} />);
+
+    expect(view.getByText("录音上传失败")).toBeTruthy();
+    expect(view.getByText("等待全员评分完成")).toBeTruthy();
+    expect(view.queryByText("表现优秀")).toBeNull();
   });
 });

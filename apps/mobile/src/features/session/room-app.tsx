@@ -12,8 +12,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { sessionReducer, initialSessionState, type Screen } from "./session-reducer";
 import { AuthScreen as VisualAuthScreen } from "./auth-screen";
 import {
+  demoMediaUiState,
   LiveScreen,
   LobbyScreen,
+  type MediaUiState,
   ReportScreen,
   WaitingScreen,
 } from "./story-screens";
@@ -133,7 +135,7 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
 }
 
-export function RoomApp({ client: injectedClient }: { client?: RoomClient }) {
+export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState }: { client?: RoomClient; mediaState?: MediaUiState }) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
   const client = useRef<RoomClient>(injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
   const [apiError, setApiError] = useState<string>();
@@ -229,10 +231,10 @@ export function RoomApp({ client: injectedClient }: { client?: RoomClient }) {
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen busy={busy} mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
     register: <VisualAuthScreen busy={busy} mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
-    lobby: <LobbyScreen busy={busy} onCreate={create} onJoin={joinByCode} />,
-    waiting: <WaitingScreen busy={busy} ready={state.ready} roomCode={state.room?.code} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
-    live: <LiveScreen busy={busy} onEnd={end} />,
-    report: <ReportScreen error={reportError} items={reportItems} onDone={() => dispatch({ type: "leaveRoom" })} onRetry={retry} />,
+    lobby: <LobbyScreen busy={busy} mediaState={mediaState} onCreate={create} onJoin={joinByCode} />,
+    waiting: <WaitingScreen busy={busy} mediaState={mediaState} ready={state.ready} roomCode={state.room?.code} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
+    live: <LiveScreen busy={busy} mediaState={mediaState} onEnd={end} />,
+    report: <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={() => dispatch({ type: "leaveRoom" })} onRetry={retry} />,
   };
   return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{pages[state.screen]}</>;
 }
