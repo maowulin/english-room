@@ -21,6 +21,9 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
+# Local QA / screenshot evidence (kept locally, never committed)
+.qa-screenshots/
+
 # debug
 npm-debug.*
 yarn-debug.*

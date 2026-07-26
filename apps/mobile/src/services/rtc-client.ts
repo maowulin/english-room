@@ -14,6 +14,7 @@ export interface RtcClient {
   getState(): RtcState;
 }
 
+// Demo/Fake: Phase 1 control-plane only; no real TRTC/SOE media path.
 export class FakeRtcClient implements RtcClient {
   private state: RtcState = {
     joined: false,

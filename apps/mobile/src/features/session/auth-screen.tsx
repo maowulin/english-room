@@ -11,8 +11,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type AuthScreenProps = {
   mode: "login" | "register";
-  onLogin: () => void;
+  onLogin: (nickname: string) => void;
   onToggle: () => void;
+  busy?: boolean;
 };
 
 function BookLogo() {
@@ -27,46 +28,8 @@ function BookLogo() {
   );
 }
 
-function Field({
-  label,
-  placeholder,
-  testID,
-  value,
-  onChangeText,
-  action,
-}: {
-  label: string;
-  placeholder: string;
-  testID?: string;
-  value?: string;
-  onChangeText?: (value: string) => void;
-  action?: string;
-}) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.inputRow}>
-        <Text style={styles.fieldGlyph}>{label === "密码" || label === "确认密码" ? "♙" : label === "验证码" ? "◇" : label === "昵称" ? "♙" : "✉"}</Text>
-        <TextInput
-          accessibilityLabel={label}
-          autoCapitalize="none"
-          onChangeText={onChangeText}
-          placeholder={placeholder}
-          placeholderTextColor="#969A94"
-          secureTextEntry={label.includes("密码")}
-          style={styles.input}
-          testID={testID}
-          value={value}
-        />
-        {action ? <Pressable accessibilityLabel={action} style={styles.send}><Text style={styles.sendText}>{action}</Text></Pressable> : null}
-      </View>
-    </View>
-  );
-}
-
-export function AuthScreen({ mode, onLogin, onToggle }: AuthScreenProps) {
-  const [email, setEmail] = useState("");
-  const [agreed, setAgreed] = useState(true);
+export function AuthScreen({ mode, onLogin, onToggle, busy = false }: AuthScreenProps) {
+  const [nickname, setNickname] = useState("Mint");
   const register = mode === "register";
 
   return (
@@ -79,39 +42,57 @@ export function AuthScreen({ mode, onLogin, onToggle }: AuthScreenProps) {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {register ? <Pressable accessibilityLabel="返回登录" onPress={onToggle}><Text style={styles.back}>‹</Text></Pressable> : null}
         <BookLogo />
-        <Text style={styles.title}>{register ? "创建账号" : "欢迎回来"}</Text>
+        <View style={styles.demoBadge} accessibilityLabel="Demo 访客模式">
+          <Text style={styles.demoBadgeText}>Demo Guest Mode · 非真实登录</Text>
+        </View>
+        <Text style={styles.title}>{register ? "Demo 访客说明" : "欢迎回来"}</Text>
         <View style={styles.titleRule}><View /><Text>✦</Text><View /></View>
-        <Text style={styles.subtitle}>{register ? "加入房间，开始你的英语冒险" : "登录后继续你的英语故事"}</Text>
+        <Text style={styles.subtitle}>
+          {register
+            ? "当前没有邮箱注册/验证码/密码登录；点击进入只会创建 guest session。"
+            : "当前为 Demo 访客入口；不会校验邮箱或密码。"}
+        </Text>
 
-        {register ? (
-          <View style={styles.steps}>
-            {["账号", "资料", "完成"].map((name, index) => (
-              <View key={name} style={styles.step}>
-                <View style={[styles.stepDot, index === 0 && styles.stepActive]}><Text style={[styles.stepText, index === 0 && styles.stepTextActive]}>{index + 1}</Text></View>
-                <Text style={[styles.stepName, index === 0 && styles.stepNameActive]}>{name}</Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.cover}>
-            <View style={styles.coverDoor}><Text style={styles.coverSign}>ENGLISH{"\n"}ROOM</Text></View>
-            <View style={styles.coverSea} />
-            <View style={styles.coverLight} />
-          </View>
-        )}
+        <View style={styles.cover}>
+          <View style={styles.coverDoor}><Text style={styles.coverSign}>ENGLISH{"\n"}ROOM</Text></View>
+          <View style={styles.coverSea} />
+          <View style={styles.coverLight} />
+        </View>
 
         <View style={styles.form}>
-          {register ? <Field label="昵称" placeholder="你的显示名称" /> : null}
-          <Field label="邮箱" onChangeText={setEmail} placeholder="name@example.com" testID="email-input" value={email} />
-          {register ? <Field action="发送验证码" label="验证码" placeholder="6 位验证码" /> : null}
-          <Field label="密码" placeholder={register ? "至少 8 位字符" : "请输入密码"} />
-          {register ? <Field label="确认密码" placeholder="再次输入密码" /> : null}
-          {!register ? <Pressable accessibilityLabel="找回密码"><Text style={styles.forgot}>忘记密码？</Text></Pressable> : null}
-          {register ? <Pressable accessibilityLabel="同意用户协议" onPress={() => setAgreed(!agreed)} style={styles.agree}><View style={[styles.checkbox, agreed && styles.checkboxChecked]}><Text style={styles.check}>✓</Text></View><Text style={styles.agreeText}>我已阅读并同意 <Text style={styles.link}>《用户协议》</Text> 和 <Text style={styles.link}>《隐私政策》</Text></Text></Pressable> : null}
-          <Pressable accessibilityLabel={register ? "创建账号" : "登录"} onPress={onLogin} style={styles.primary} testID={register ? "register-button" : "login-button"}><Text style={styles.primaryText}>{register ? "创建账号" : "登录"}</Text></Pressable>
-          {!register ? <><View style={styles.or}><View /><Text>或</Text><View /></View><View style={styles.socials}><Pressable accessibilityLabel="使用 Apple 登录" onPress={onLogin} style={styles.social}><Text>●  使用 Apple 登录</Text></Pressable><Pressable accessibilityLabel="使用微信登录" onPress={onLogin} style={styles.social}><Text style={styles.wechat}>●  使用微信登录</Text></Pressable></View></> : null}
+          <View style={styles.field}>
+            <Text style={styles.label}>昵称（Demo）</Text>
+            <View style={styles.inputRow}>
+              <Text style={styles.fieldGlyph}>♙</Text>
+              <TextInput
+                accessibilityLabel="昵称"
+                autoCapitalize="none"
+                editable={!busy}
+                onChangeText={setNickname}
+                placeholder="输入显示昵称"
+                placeholderTextColor="#969A94"
+                style={styles.input}
+                testID="nickname-input"
+                value={nickname}
+              />
+            </View>
+          </View>
+          <Text style={styles.hint}>真实邮箱注册/密码登录尚未接入；本屏只调用 POST /v1/guest-sessions。</Text>
+          <Pressable
+            accessibilityLabel="以访客进入"
+            disabled={busy}
+            onPress={() => { if (!busy) onLogin(nickname.trim() || "Mint"); }}
+            style={[styles.primary, busy && styles.primaryDisabled]}
+            testID="login-button"
+          >
+            <Text style={styles.primaryText}>{busy ? "进入中…" : "以访客进入（Demo）"}</Text>
+          </Pressable>
         </View>
-        <Pressable accessibilityLabel={register ? "前往登录" : "前往注册"} onPress={onToggle}><Text style={styles.bottomText}>{register ? "已有账号？  登录" : "还没有账号？  创建账号"}</Text></Pressable>
+        <Pressable accessibilityLabel={register ? "前往登录" : "前往注册"} onPress={onToggle}>
+          <Text style={styles.bottomText}>
+            {register ? "返回 Demo 入口" : "了解 Demo 模式说明"}
+          </Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -132,9 +113,11 @@ const styles = StyleSheet.create({
   bookSpine: { backgroundColor: "#144B3B", height: 36, left: 14, position: "absolute", width: 2 },
   bookPage: { borderColor: "#144B3B", borderLeftWidth: 1, borderTopWidth: 1, height: 23, left: 17, position: "absolute", top: 6, transform: [{ skewY: "-13deg" }], width: 11 },
   logoText: { color: "#174638", fontFamily: "serif", fontSize: 26, fontWeight: "700" },
-  title: { color: "#183F33", fontFamily: "serif", fontSize: 36, fontWeight: "700", marginTop: 20 },
+  demoBadge: { alignSelf: "flex-start", backgroundColor: "#E8F2EA", borderColor: "#1C593F", borderRadius: 8, borderWidth: 1, marginTop: 14, paddingHorizontal: 10, paddingVertical: 6 },
+  demoBadgeText: { color: "#1C593F", fontSize: 12, fontWeight: "800" },
+  title: { color: "#183F33", fontFamily: "serif", fontSize: 36, fontWeight: "700", marginTop: 16 },
   titleRule: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8, width: 100 },
-  subtitle: { color: "#68766E", fontSize: 14, marginTop: 7 },
+  subtitle: { color: "#68766E", fontSize: 14, lineHeight: 20, marginTop: 7 },
   cover: { backgroundColor: "#173E38", borderRadius: 18, height: 188, marginTop: 14, overflow: "hidden" },
   coverDoor: { backgroundColor: "#202D2B", borderColor: "#596258", borderWidth: 4, bottom: 0, height: 190, left: 40, position: "absolute", width: 105 },
   coverSign: { color: "#D7C184", fontSize: 9, left: 25, lineHeight: 13, position: "absolute", textAlign: "center", top: 87 },
@@ -146,25 +129,9 @@ const styles = StyleSheet.create({
   inputRow: { alignItems: "center", borderColor: "#D8D4C8", borderRadius: 12, borderWidth: 1, flexDirection: "row", height: 47, paddingHorizontal: 14 },
   fieldGlyph: { color: "#234D40", fontSize: 17, marginRight: 12 },
   input: { color: "#173F34", flex: 1, fontSize: 15, height: "100%" },
-  send: { borderColor: "#1E5A47", borderRadius: 7, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8 },
-  sendText: { color: "#1E5A47", fontSize: 12, fontWeight: "700" },
-  forgot: { color: "#295746", fontSize: 13, fontWeight: "700", textAlign: "right" },
+  hint: { color: "#6A776F", fontSize: 12, lineHeight: 18 },
   primary: { alignItems: "center", backgroundColor: "#174D39", borderRadius: 10, height: 47, justifyContent: "center", marginTop: 2 },
+  primaryDisabled: { opacity: 0.5 },
   primaryText: { color: "#FFFDF8", fontSize: 17, fontWeight: "800" },
-  or: { alignItems: "center", flexDirection: "row", gap: 14, marginTop: 4 },
-  socials: { flexDirection: "row", gap: 12 },
-  social: { alignItems: "center", borderColor: "#9AABA0", borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 10 },
-  wechat: { color: "#1A7F55" },
   bottomText: { color: "#4E6259", fontSize: 13, marginTop: 13, textAlign: "center" },
-  steps: { flexDirection: "row", justifyContent: "space-between", marginTop: 30 },
-  step: { alignItems: "center", width: "30%" },
-  stepDot: { alignItems: "center", backgroundColor: "#FCFAF4", borderColor: "#BEC6BE", borderRadius: 16, borderWidth: 1, height: 32, justifyContent: "center", width: 32 },
-  stepActive: { backgroundColor: "#1C593F", borderColor: "#1C593F" },
-  stepText: { color: "#89938B", fontSize: 16 }, stepTextActive: { color: "#FFF", fontWeight: "800" },
-  stepName: { color: "#8A938C", fontSize: 13, marginTop: 7 }, stepNameActive: { color: "#1C593F", fontWeight: "800" },
-  agree: { alignItems: "center", flexDirection: "row", gap: 9 },
-  checkbox: { borderColor: "#1E5944", borderRadius: 4, borderWidth: 1, height: 19, width: 19 },
-  checkboxChecked: { alignItems: "center", backgroundColor: "#1E5944", justifyContent: "center" },
-  check: { color: "#FFF", fontSize: 13, fontWeight: "900" },
-  agreeText: { color: "#53645B", flex: 1, fontSize: 12, lineHeight: 18 }, link: { color: "#1F684E" },
 });

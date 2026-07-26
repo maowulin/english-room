@@ -46,6 +46,7 @@ export interface RoomClient {
 }
 
 export class FakeRoomClient implements RoomClient {
+  // Demo/Fake: Phase 1 control-plane substitute; not a production room service.
   private rooms = new Map<string, Room>();
   private reports = new Map<string, RoomReport>();
   private sequence = 1;
@@ -145,6 +146,25 @@ type RoomSnapshot = {
   members: { player_id: string; ready: boolean }[];
 };
 
+type ApiError = Error & { status?: number };
+
+/**
+ * Phase 1 Demo room-status compatibility table (App-side only).
+ * Backend (tonight): lobby → live → processing
+ * Legacy aliases kept: waiting, active, ended
+ * Phase 2 delete when Backend exports shared App enums.
+ */
+export function mapBackendRoomStatus(status: string): Room["status"] {
+  if (status === "lobby" || status === "waiting") return "waiting";
+  if (status === "live" || status === "active") return "live";
+  if (status === "processing" || status === "ended") return "ended";
+  throw new Error(`未知房间状态：${status}`);
+}
+
+function isConflictError(error: unknown): boolean {
+  return error instanceof Error && (error as ApiError).status === 409;
+}
+
 export class HttpRoomClient implements RoomClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
@@ -189,10 +209,30 @@ export class HttpRoomClient implements RoomClient {
     return { playerName: job.player_id, scoreJobId: job.score_job_id, status: status as ReportItem["status"], score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text };
   }
   private async versioned(roomId: string, method: "POST" | "PUT", suffix: string): Promise<Room> {
+    await this.refreshVersion(roomId);
+    try {
+      return await this.versionedOnce(roomId, method, suffix);
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      await this.refreshVersion(roomId);
+      return this.versionedOnce(roomId, method, suffix);
+    }
+  }
+  private async refreshVersion(roomId: string): Promise<void> {
+    await this.getRoom(roomId);
+  }
+  private async versionedOnce(roomId: string, method: "POST" | "PUT", suffix: string): Promise<Room> {
     return this.mapRoom(await this.request(`/v1/rooms/${roomId}${suffix}`, { method, body: JSON.stringify({ room_version: this.versions.get(roomId) ?? 1 }) }) as RoomSnapshot);
   }
   private mapRoom(snapshot: RoomSnapshot): Room {
-    const room: Room = { id: snapshot.room_id, code: snapshot.room_code, title: snapshot.title, status: snapshot.status === "active" ? "live" : snapshot.status === "ended" ? "ended" : "waiting", version: snapshot.version, members: snapshot.members.map((member) => ({ playerId: member.player_id, ready: member.ready })) };
+    const room: Room = {
+      id: snapshot.room_id,
+      code: snapshot.room_code,
+      title: snapshot.title,
+      status: mapBackendRoomStatus(snapshot.status),
+      version: snapshot.version,
+      members: snapshot.members.map((member) => ({ playerId: member.player_id, ready: member.ready })),
+    };
     this.versions.set(room.id, snapshot.version);
     return room;
   }
@@ -201,7 +241,11 @@ export class HttpRoomClient implements RoomClient {
     if (authorize && this.token) headers.Authorization = `Bearer ${this.token}`;
     if (init.method && init.method !== "GET") headers["Idempotency-Key"] = this.idGenerator();
     const response = await this.fetcher(`${this.baseUrl}${path}`, { ...init, headers });
-    if (!response.ok) throw new Error(`API 请求失败（HTTP ${response.status}）`);
+    if (!response.ok) {
+      const error: ApiError = new Error(`API 请求失败（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   }
 }
