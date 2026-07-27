@@ -19,12 +19,12 @@ describe("AnalyticsEvents", () => {
     submit.mockImplementation(() => new Promise(() => undefined));
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    const returned = events.appOpened({ coldStart: true });
+    const returned = events.appOpened({ entry_point: "cold_start" });
 
     expect(returned).toBeUndefined();
     expect(submit).toHaveBeenCalledWith({
       name: "app_opened",
-      payload: { coldStart: true },
+      payload: { entry_point: "cold_start" },
     });
   });
 
@@ -33,11 +33,19 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.guestSessionCreated({ sessionId: "g-1" });
+    events.guestSessionCreated({
+      guest_session_id: "g-1",
+      session_type: "guest",
+      player_id: "player-1",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "guest_session_created",
-      payload: { sessionId: "g-1" },
+      payload: {
+        guest_session_id: "g-1",
+        session_type: "guest",
+        player_id: "player-1",
+      },
     });
   });
 
@@ -46,11 +54,21 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.roomCreated({ roomId: "room-1" });
+    events.roomCreated({
+      room_id: "room-1",
+      player_id: "player-1",
+      room_version: 1,
+      room_role: "host",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "room_created",
-      payload: { roomId: "room-1" },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        room_version: 1,
+        room_role: "host",
+      },
     });
   });
 
@@ -59,11 +77,23 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.roomJoined({ roomId: "room-1", role: "member" });
+    events.roomJoined({
+      room_id: "room-1",
+      player_id: "player-1",
+      room_version: 2,
+      join_method: "room_code",
+      room_role: "member",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "room_joined",
-      payload: { roomId: "room-1", role: "member" },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        room_version: 2,
+        join_method: "room_code",
+        room_role: "member",
+      },
     });
   });
 
@@ -72,11 +102,21 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.roomReadyChanged({ roomId: "room-1", ready: true });
+    events.roomReadyChanged({
+      room_id: "room-1",
+      player_id: "player-1",
+      ready_state: "ready",
+      room_version: 3,
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "room_ready_changed",
-      payload: { roomId: "room-1", ready: true },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        ready_state: "ready",
+        room_version: 3,
+      },
     });
   });
 
@@ -85,11 +125,23 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.roomStarted({ roomId: "room-1" });
+    events.roomStarted({
+      room_id: "room-1",
+      room_version: 4,
+      member_count: 4,
+      ready_member_count: 4,
+      started_by_player_id: "player-host",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "room_started",
-      payload: { roomId: "room-1" },
+      payload: {
+        room_id: "room-1",
+        room_version: 4,
+        member_count: 4,
+        ready_member_count: 4,
+        started_by_player_id: "player-host",
+      },
     });
   });
 
@@ -98,11 +150,19 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.rtcConnectionChanged({ roomId: "room-1", state: "connected" });
+    events.rtcConnectionChanged({
+      room_id: "room-1",
+      player_id: "player-1",
+      connection_state: "connected",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "rtc_connection_changed",
-      payload: { roomId: "room-1", state: "connected" },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        connection_state: "connected",
+      },
     });
   });
 
@@ -111,11 +171,21 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.roomEnded({ roomId: "room-1", reason: "host_action" });
+    events.roomEnded({
+      room_id: "room-1",
+      room_version: 5,
+      ended_by_player_id: "player-host",
+      end_reason: "host_action",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "room_ended",
-      payload: { roomId: "room-1", reason: "host_action" },
+      payload: {
+        room_id: "room-1",
+        room_version: 5,
+        ended_by_player_id: "player-host",
+        end_reason: "host_action",
+      },
     });
   });
 
@@ -124,11 +194,19 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.recordingStatusChanged({ roomId: "room-1", status: "recording" });
+    events.recordingStatusChanged({
+      room_id: "room-1",
+      recording_status: "recording",
+      status_sequence: 1,
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "recording_status_changed",
-      payload: { roomId: "room-1", status: "recording" },
+      payload: {
+        room_id: "room-1",
+        recording_status: "recording",
+        status_sequence: 1,
+      },
     });
   });
 
@@ -137,11 +215,19 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.scoreReportViewed({ roomId: "room-1" });
+    events.scoreReportViewed({
+      room_id: "room-1",
+      player_id: "player-1",
+      report_state: "success",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "score_report_viewed",
-      payload: { roomId: "room-1" },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        report_state: "success",
+      },
     });
   });
 
@@ -150,11 +236,23 @@ describe("AnalyticsEvents", () => {
     submit.mockResolvedValue({ accepted: true });
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    events.scoreRetryRequested({ roomId: "room-1" });
+    events.scoreRetryRequested({
+      room_id: "room-1",
+      player_id: "player-1",
+      score_job_id: "job-1",
+      attempt_number: 2,
+      retry_reason: "user_action",
+    });
 
     expect(submit).toHaveBeenCalledWith({
       name: "score_retry_requested",
-      payload: { roomId: "room-1" },
+      payload: {
+        room_id: "room-1",
+        player_id: "player-1",
+        score_job_id: "job-1",
+        attempt_number: 2,
+        retry_reason: "user_action",
+      },
     });
   });
 
@@ -164,17 +262,17 @@ describe("AnalyticsEvents", () => {
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
     events.opsHandoffStarted({
-      buildVariant: "internal_ops",
-      handoffSurface: "ops_webview",
-      entryPoint: "admin_menu",
+      build_variant: "internal_ops",
+      handoff_surface: "ops_webview",
+      entry_point: "admin_menu",
     });
 
     expect(submit).toHaveBeenCalledWith({
       name: "ops_handoff_started",
       payload: {
-        buildVariant: "internal_ops",
-        handoffSurface: "ops_webview",
-        entryPoint: "admin_menu",
+        build_variant: "internal_ops",
+        handoff_surface: "ops_webview",
+        entry_point: "admin_menu",
       },
     });
   });
@@ -184,7 +282,7 @@ describe("AnalyticsEvents", () => {
     submit.mockRejectedValue(new Error("network down"));
     const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
 
-    expect(() => events.appOpened({ coldStart: false })).not.toThrow();
+    expect(() => events.appOpened({ entry_point: "warm_resume" })).not.toThrow();
   });
 
   it("delegates sensitive payload rejection to AnalyticsClient without throwing", async () => {
@@ -196,11 +294,19 @@ describe("AnalyticsEvents", () => {
     });
 
     expect(() =>
-      events.roomJoined({ roomId: "r-1", email: "user@example.com" } as never),
+      events.roomJoined({
+        room_id: "r-1",
+        join_method: "room_code",
+        email: "user@example.com",
+      } as never),
     ).not.toThrow();
     expect(submitSpy).toHaveBeenCalledWith({
       name: "room_joined",
-      payload: { roomId: "r-1", email: "user@example.com" },
+      payload: {
+        room_id: "r-1",
+        join_method: "room_code",
+        email: "user@example.com",
+      },
     });
 
     submitSpy.mockRestore();

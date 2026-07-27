@@ -2,13 +2,16 @@ import {
   AnalyticsClient,
   type AppOpenedPayload,
   type GuestSessionCreatedPayload,
+  type OpsHandoffStartedPayload,
   type RecordingStatusChangedPayload,
+  type RoomCreatedPayload,
   type RoomEndedPayload,
   type RoomJoinedPayload,
   type RoomReadyChangedPayload,
-  type RoomScopedPayload,
+  type RoomStartedPayload,
   type RtcConnectionChangedPayload,
-  type OpsHandoffStartedPayload,
+  type ScoreReportViewedPayload,
+  type ScoreRetryRequestedPayload,
 } from "@/services/analytics-client";
 
 type AnalyticsEventsClient = Pick<AnalyticsClient, "submit">;
@@ -35,7 +38,7 @@ export class AnalyticsEvents {
     fireAndForgetSubmit(this.client, { name: "guest_session_created", payload });
   }
 
-  roomCreated(payload?: RoomScopedPayload): void {
+  roomCreated(payload?: RoomCreatedPayload): void {
     fireAndForgetSubmit(this.client, { name: "room_created", payload });
   }
 
@@ -47,7 +50,7 @@ export class AnalyticsEvents {
     fireAndForgetSubmit(this.client, { name: "room_ready_changed", payload });
   }
 
-  roomStarted(payload?: RoomScopedPayload): void {
+  roomStarted(payload?: RoomStartedPayload): void {
     fireAndForgetSubmit(this.client, { name: "room_started", payload });
   }
 
@@ -66,11 +69,11 @@ export class AnalyticsEvents {
     });
   }
 
-  scoreReportViewed(payload?: RoomScopedPayload): void {
+  scoreReportViewed(payload?: ScoreReportViewedPayload): void {
     fireAndForgetSubmit(this.client, { name: "score_report_viewed", payload });
   }
 
-  scoreRetryRequested(payload?: RoomScopedPayload): void {
+  scoreRetryRequested(payload?: ScoreRetryRequestedPayload): void {
     fireAndForgetSubmit(this.client, { name: "score_retry_requested", payload });
   }
 

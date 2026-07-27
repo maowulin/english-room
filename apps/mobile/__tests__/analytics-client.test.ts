@@ -19,7 +19,7 @@ describe("AnalyticsClient", () => {
     const client = new AnalyticsClient({ context: baseContext });
 
     await expect(
-      client.submit({ name: "app_opened", payload: { coldStart: true } }),
+      client.submit({ name: "app_opened", payload: { entry_point: "cold_start" } }),
     ).resolves.toEqual({ accepted: true });
   });
 
@@ -34,7 +34,13 @@ describe("AnalyticsClient", () => {
     await client.submit(
       {
         name: "room_joined",
-        payload: { roomId: "room-42", role: "guest" },
+        payload: {
+          room_id: "room-42",
+          player_id: "player-1",
+          room_version: 1,
+          join_method: "room_code",
+          room_role: "member",
+        },
       },
       {
         eventId: "11111111-1111-4111-8111-111111111111",
@@ -57,7 +63,13 @@ describe("AnalyticsClient", () => {
       environment: "development",
       producer: "client",
       correlation_id: "corr-join-1",
-      properties: { roomId: "room-42", role: "guest" },
+      properties: {
+        room_id: "room-42",
+        player_id: "player-1",
+        room_version: 1,
+        join_method: "room_code",
+        room_role: "member",
+      },
     });
     expect(record).not.toHaveProperty("name");
     expect(record).not.toHaveProperty("payload");
@@ -85,24 +97,76 @@ describe("AnalyticsClient", () => {
     const client = new AnalyticsClient({ context: baseContext, transport });
 
     const events = [
-      { name: "app_opened" as const, payload: { coldStart: false } },
-      { name: "guest_session_created" as const, payload: { sessionId: "g-1" } },
-      { name: "room_created" as const, payload: { roomId: "r-1" } },
-      { name: "room_joined" as const, payload: { roomId: "r-1" } },
-      { name: "room_ready_changed" as const, payload: { roomId: "r-1", ready: true } },
-      { name: "room_started" as const, payload: { roomId: "r-1" } },
+      { name: "app_opened" as const, payload: { entry_point: "warm_resume" as const } },
+      {
+        name: "guest_session_created" as const,
+        payload: { guest_session_id: "g-1", session_type: "guest" as const, player_id: "p-1" },
+      },
+      {
+        name: "room_created" as const,
+        payload: { room_id: "r-1", player_id: "p-1", room_version: 1, room_role: "host" as const },
+      },
+      {
+        name: "room_joined" as const,
+        payload: {
+          room_id: "r-1",
+          player_id: "p-1",
+          room_version: 1,
+          join_method: "room_code" as const,
+        },
+      },
+      {
+        name: "room_ready_changed" as const,
+        payload: {
+          room_id: "r-1",
+          player_id: "p-1",
+          ready_state: "ready" as const,
+          room_version: 2,
+        },
+      },
+      {
+        name: "room_started" as const,
+        payload: { room_id: "r-1", room_version: 3, member_count: 2, ready_member_count: 2, started_by_player_id: "p-1" },
+      },
       {
         name: "rtc_connection_changed" as const,
-        payload: { roomId: "r-1", state: "connected" },
+        payload: { room_id: "r-1", player_id: "p-1", connection_state: "connected" as const },
       },
-      { name: "room_ended" as const, payload: { roomId: "r-1", reason: "completed" } },
+      {
+        name: "room_ended" as const,
+        payload: {
+          room_id: "r-1",
+          room_version: 4,
+          ended_by_player_id: "p-1",
+          end_reason: "host_action" as const,
+        },
+      },
       {
         name: "recording_status_changed" as const,
-        payload: { roomId: "r-1", status: "started" },
+        payload: { room_id: "r-1", recording_status: "recording" as const, status_sequence: 1 },
       },
-      { name: "score_report_viewed" as const, payload: { roomId: "r-1" } },
-      { name: "score_retry_requested" as const, payload: { roomId: "r-1" } },
-      { name: "ops_handoff_started" as const, payload: { buildVariant: "internal_ops" } },
+      {
+        name: "score_report_viewed" as const,
+        payload: { room_id: "r-1", player_id: "p-1", report_state: "waiting" as const },
+      },
+      {
+        name: "score_retry_requested" as const,
+        payload: {
+          room_id: "r-1",
+          player_id: "p-1",
+          score_job_id: "job-1",
+          attempt_number: 1,
+          retry_reason: "user_action" as const,
+        },
+      },
+      {
+        name: "ops_handoff_started" as const,
+        payload: {
+          build_variant: "internal_ops" as const,
+          handoff_surface: "ops_webview" as const,
+          entry_point: "admin_menu" as const,
+        },
+      },
     ];
 
     for (const event of events) {
@@ -132,7 +196,7 @@ describe("AnalyticsClient", () => {
     const client = new AnalyticsClient({ context: baseContext, transport });
 
     await expect(
-      client.submit({ name: "app_opened", payload }),
+      client.submit({ name: "app_opened", payload: payload as never }),
     ).resolves.toEqual({
       accepted: false,
       reason: expect.stringMatching(/敏感|sensitive/i),
@@ -147,7 +211,7 @@ describe("AnalyticsClient", () => {
     await expect(
       client.submit({
         name: "room_joined",
-        payload: { roomId: "r-1", meta: { accessToken: "nested" } },
+        payload: { room_id: "r-1", meta: { accessToken: "nested" } } as never,
       }),
     ).resolves.toMatchObject({ accepted: false });
     expect(transport).not.toHaveBeenCalled();
@@ -159,7 +223,7 @@ describe("AnalyticsClient", () => {
     const client = new AnalyticsClient({ context: baseContext, transport });
 
     await expect(
-      client.submit({ name: "app_opened", payload: { coldStart: true } }),
+      client.submit({ name: "app_opened", payload: { entry_point: "cold_start" } }),
     ).resolves.toEqual({ accepted: false });
   });
 

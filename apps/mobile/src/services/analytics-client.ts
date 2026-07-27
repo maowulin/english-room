@@ -26,58 +26,142 @@ export type AnalyticsEventName =
   | "score_retry_requested"
   | "ops_handoff_started";
 
-type AnonymousPayload = Record<string, unknown>;
-
-export type AppOpenedPayload = AnonymousPayload & {
-  coldStart?: boolean;
+export type AppOpenedPayload = {
+  entry_point?: "cold_start" | "warm_resume" | "push" | "deep_link";
+  previous_app_session_gap_ms?: number;
 };
 
-export type GuestSessionCreatedPayload = AnonymousPayload & {
-  sessionId?: string;
+export type GuestSessionCreatedPayload = {
+  guest_session_id?: string;
+  session_type?: "guest";
+  player_id?: string;
+  entry_point?: "app_open" | "room_create" | "room_join";
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
-export type RoomScopedPayload = AnonymousPayload & {
-  roomId?: string;
+export type RoomCreatedPayload = {
+  room_id?: string;
+  player_id?: string;
+  room_version?: number;
+  room_role?: "host";
+  story_id?: string;
+  creation_mode?: "quick_create" | "story_select";
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
-export type RoomReadyChangedPayload = RoomScopedPayload & {
-  ready?: boolean;
+export type RoomJoinedPayload = {
+  room_id?: string;
+  player_id?: string;
+  room_version?: number;
+  join_method?: "room_code" | "recent_room" | "deep_link" | "invite";
+  seat_index?: number;
+  room_role?: "host" | "member";
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
-export type RtcConnectionChangedPayload = RoomScopedPayload & {
-  state?: string;
+export type RoomReadyChangedPayload = {
+  room_id?: string;
+  player_id?: string;
+  ready_state?: "ready" | "not_ready" | "blocked";
+  room_version?: number;
+  change_source?: "user" | "system";
+  mic_check_state?: "not_checked" | "passed" | "failed";
+  correlation_id?: string;
 };
 
-export type RoomEndedPayload = RoomScopedPayload & {
-  reason?: string;
+export type RoomStartedPayload = {
+  room_id?: string;
+  room_version?: number;
+  member_count?: number;
+  ready_member_count?: number;
+  started_by_player_id?: string;
+  start_mode?: "host_action" | "system_resume";
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
-export type RecordingStatusChangedPayload = RoomScopedPayload & {
-  status?: string;
+export type RtcConnectionChangedPayload = {
+  room_id?: string;
+  player_id?: string;
+  connection_state?: "connecting" | "connected" | "reconnecting" | "disconnected" | "failed";
+  previous_state?: string;
+  reason_code?: "network_lost" | "network_recovered" | "permission_denied" | "provider_error";
+  duration_ms?: number;
+  attempt_number?: number;
 };
 
-export type RoomJoinedPayload = RoomScopedPayload & {
-  role?: string;
+export type RoomEndedPayload = {
+  room_id?: string;
+  room_version?: number;
+  ended_by_player_id?: string;
+  end_reason?: "host_action" | "timeout" | "system_failure";
+  live_duration_ms?: number;
+  member_count?: number;
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
-export type OpsHandoffStartedPayload = AnonymousPayload & {
-  buildVariant?: string;
-  handoffSurface?: string;
-  entryPoint?: string;
+export type RecordingStatusChangedPayload = {
+  room_id?: string;
+  recording_status?:
+    | "requested"
+    | "recording"
+    | "stopping"
+    | "ready"
+    | "failed"
+    | "expired";
+  status_sequence?: number;
+  failure_reason_code?: string;
+  participant_count?: number;
+  latency_ms?: number;
+  correlation_id?: string;
+};
+
+export type ScoreReportViewedPayload = {
+  room_id?: string;
+  player_id?: string;
+  report_state?: "waiting" | "processing" | "success" | "failed";
+  entry_point?: "room_end" | "history" | "notification";
+  latency_ms?: number;
+  report_version?: number;
+};
+
+export type ScoreRetryRequestedPayload = {
+  room_id?: string;
+  player_id?: string;
+  score_job_id?: string;
+  attempt_number?: number;
+  retry_reason?: "user_action";
+  failure_reason_code?: string;
+  correlation_id?: string;
+  latency_ms?: number;
+};
+
+export type OpsHandoffStartedPayload = {
+  build_variant?: "internal_ops";
+  handoff_surface?: "ops_webview";
+  entry_point?: "admin_menu" | "deep_link";
+  destination_host?: string;
+  webview_version?: string;
+  correlation_id?: string;
+  latency_ms?: number;
 };
 
 export type AnalyticsEvent =
   | { name: "app_opened"; payload?: AppOpenedPayload }
   | { name: "guest_session_created"; payload?: GuestSessionCreatedPayload }
-  | { name: "room_created"; payload?: RoomScopedPayload }
+  | { name: "room_created"; payload?: RoomCreatedPayload }
   | { name: "room_joined"; payload?: RoomJoinedPayload }
   | { name: "room_ready_changed"; payload?: RoomReadyChangedPayload }
-  | { name: "room_started"; payload?: RoomScopedPayload }
+  | { name: "room_started"; payload?: RoomStartedPayload }
   | { name: "rtc_connection_changed"; payload?: RtcConnectionChangedPayload }
   | { name: "room_ended"; payload?: RoomEndedPayload }
   | { name: "recording_status_changed"; payload?: RecordingStatusChangedPayload }
-  | { name: "score_report_viewed"; payload?: RoomScopedPayload }
-  | { name: "score_retry_requested"; payload?: RoomScopedPayload }
+  | { name: "score_report_viewed"; payload?: ScoreReportViewedPayload }
+  | { name: "score_retry_requested"; payload?: ScoreRetryRequestedPayload }
   | { name: "ops_handoff_started"; payload?: OpsHandoffStartedPayload };
 
 /** Wire envelope for `/v1/analytics/events` and transport sinks. */
