@@ -1,5 +1,7 @@
-import { useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
+  PermissionsAndroid,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +24,18 @@ import {
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 import { HttpRoomClient, type RoomClient, type ReportItem } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
+import { createRtcClient } from "@/services/rtc-factory";
+import { resolveMediaMode, type RtcClient } from "@/services/rtc-client";
+
+function mapRtcToMedia(rtc: string): MediaUiState["rtc"] {
+  if (rtc === "connected") return "joined";
+  if (rtc === "joining") return "joining";
+  if (rtc === "reconnecting") return "reconnecting";
+  if (rtc === "kicked") return "kicked";
+  if (rtc === "joinFailed") return "joinFailed";
+  if (rtc === "disconnected") return "disconnected";
+  return "idle";
+}
 
 const seats = [
   { name: "MINT", status: "已就座", tone: "mint" },
@@ -135,13 +149,79 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
 }
 
-export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState }: { client?: RoomClient; mediaState?: MediaUiState }) {
+export function RoomApp({ client: injectedClient, mediaState: injectedMediaState }: { client?: RoomClient; mediaState?: MediaUiState }) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
   const client = useRef<RoomClient>(injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
+  const mediaMode = resolveMediaMode(process.env, Platform.OS);
+  const rtcRef = useRef<RtcClient | null>(null);
+  const [liveMedia, setLiveMedia] = useState<MediaUiState>(
+    injectedMediaState ??
+      (mediaMode === "real"
+        ? {
+            mode: "real",
+            network: "good",
+            permission: "unknown",
+            grant: "idle",
+            rtc: "idle",
+            recording: "idle",
+            report: "waiting",
+          }
+        : demoMediaUiState),
+  );
+  const mediaState = injectedMediaState ?? liveMedia;
+  const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
   const [apiError, setApiError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [reportItems, setReportItems] = useState<ReportItem[]>([]);
   const [reportError, setReportError] = useState<string>();
+  useEffect(() => {
+    if (injectedMediaState || mediaMode !== "real") return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const rtc = createRtcClient("real");
+        rtcRef.current = rtc;
+        rtc.subscribe({
+          onState: (next) => {
+            setMuted(next.muted);
+            setSpeakerOn(next.speakerOn);
+            setLiveMedia((current) => ({ ...current, rtc: mapRtcToMedia(next.connection) }));
+          },
+          onNetwork: (quality) => setLiveMedia((current) => ({ ...current, network: quality })),
+        });
+      } catch (error) {
+        setApiError(error instanceof Error ? error.message : String(error));
+        setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "joinFailed" }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [injectedMediaState, mediaMode]);
+  const ensureMicPermission = async () => {
+    if (Platform.OS !== "android") {
+      setLiveMedia((current) => ({ ...current, permission: "granted" }));
+      return true;
+    }
+    setLiveMedia((current) => ({ ...current, permission: "requesting" }));
+    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+    const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+    setLiveMedia((current) => ({ ...current, permission: granted ? "granted" : "denied" }));
+    return granted;
+  };
+  const prepareRealMedia = async (roomId: string) => {
+    if (mediaMode !== "real" || injectedMediaState) return;
+    const rtc = rtcRef.current;
+    if (!rtc) throw new Error("真实语音模式 TRTC 客户端未就绪");
+    const permitted = await ensureMicPermission();
+    if (!permitted) throw new Error("麦克风权限被拒绝");
+    setLiveMedia((current) => ({ ...current, grant: "loading", rtc: "joining" }));
+    const grant = await client.issueRtcGrant(roomId);
+    setLiveMedia((current) => ({ ...current, grant: "ready" }));
+    await rtc.join(grant);
+  };
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     setApiError(message);
@@ -165,7 +245,10 @@ export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState 
     setBusy(true);
     void client
       .createRoom({ title: "雾港疑云" })
-      .then((room) => dispatch({ type: "roomJoined", room }))
+      .then(async (room) => {
+        await prepareRealMedia(room.id);
+        dispatch({ type: "roomJoined", room });
+      })
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -181,7 +264,10 @@ export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState 
     void client
       .getRoomByCode(code)
       .then((room) => client.joinRoom(room.id, { playerId }))
-      .then((room) => dispatch({ type: "roomJoined", room }))
+      .then(async (room) => {
+        await prepareRealMedia(room.id);
+        dispatch({ type: "roomJoined", room });
+      })
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -212,18 +298,30 @@ export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState 
     setApiError(undefined);
     setReportError(undefined);
     setBusy(true);
-    void client
-      .endRoom(roomId)
-      .then(() => client.getRoomReport(roomId))
-      .then((report) => {
+    void (async () => {
+      try {
+        if (mediaMode === "real" && rtcRef.current) {
+          await rtcRef.current.leave();
+        }
+        const ended = await client.endRoom(roomId);
+        if (ended.status === "recording_failed") {
+          setLiveMedia((current) => ({ ...current, recording: "failed", report: "failed" }));
+        } else {
+          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+        }
+        const report = await client.getRoomReport(roomId);
         setReportItems(report.items);
+        if (ended.status !== "recording_failed") {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "ready" }));
+        }
         dispatch({ type: "roomEnded" });
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         fail(error);
         setReportError("报告加载失败，请重试");
-      })
-      .finally(() => setBusy(false));
+      } finally {
+        setBusy(false);
+      }
+    })();
   };
   const retry = (item: ReportItem) => {
     void client.retryScoreJob(item.scoreJobId).then((next) => setReportItems((items) => items.map((current) => current.scoreJobId === next.scoreJobId ? next : current))).catch(() => setReportError("报告加载失败，请重试"));
@@ -233,7 +331,21 @@ export function RoomApp({ client: injectedClient, mediaState = demoMediaUiState 
     register: <VisualAuthScreen busy={busy} mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
     lobby: <LobbyScreen busy={busy} mediaState={mediaState} onCreate={create} onJoin={joinByCode} />,
     waiting: <WaitingScreen busy={busy} mediaState={mediaState} ready={state.ready} roomCode={state.room?.code} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
-    live: <LiveScreen busy={busy} mediaState={mediaState} onEnd={end} />,
+    live: (
+      <LiveScreen
+        busy={busy}
+        mediaState={mediaState}
+        muted={muted}
+        speakerOn={speakerOn}
+        onToggleMute={() => {
+          void rtcRef.current?.setMuted(!muted);
+        }}
+        onToggleSpeaker={() => {
+          void rtcRef.current?.setSpeaker(!speakerOn);
+        }}
+        onEnd={end}
+      />
+    ),
     report: <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={() => dispatch({ type: "leaveRoom" })} onRetry={retry} />,
   };
   return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{pages[state.screen]}</>;

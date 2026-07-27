@@ -154,9 +154,45 @@ function Player({ name, state, speaker, reconnecting }: { name: string; state: s
   return <View style={styles.livePlayer}><View style={[styles.liveAvatar, speaker && styles.speakerAvatar, reconnecting && styles.reconnectAvatar]}><Text style={styles.liveInitial}>{name[0]}</Text></View><Text style={styles.liveName}>{name}</Text><Text style={[styles.liveState, speaker && styles.speakingState, reconnecting && styles.reconnectState]}>{reconnecting ? "重新连接中" : state}</Text></View>;
 }
 
-export function LiveScreen({ onEnd, busy = false, mediaState = demoMediaUiState }: { onEnd: () => void; busy?: boolean; mediaState?: MediaUiState }) {
-  const [muted, setMuted] = useState(false); const [speaker, setSpeaker] = useState(true); const [reconnecting, setReconnecting] = useState(false);
-  const realAudioDisabled = mediaState.mode === "real" && !mediaReady(mediaState);
+export function LiveScreen({
+  onEnd,
+  busy = false,
+  mediaState = demoMediaUiState,
+  muted: mutedProp,
+  speakerOn: speakerProp,
+  onToggleMute,
+  onToggleSpeaker,
+}: {
+  onEnd: () => void;
+  busy?: boolean;
+  mediaState?: MediaUiState;
+  muted?: boolean;
+  speakerOn?: boolean;
+  onToggleMute?: () => void;
+  onToggleSpeaker?: () => void;
+}) {
+  const [mutedLocal, setMutedLocal] = useState(false);
+  const [speakerLocal, setSpeakerLocal] = useState(true);
+  const [demoReconnecting, setDemoReconnecting] = useState(false);
+  const realMode = mediaState.mode === "real";
+  const muted = realMode ? Boolean(mutedProp) : mutedLocal;
+  const speaker = realMode ? speakerProp !== false : speakerLocal;
+  const reconnecting = realMode ? mediaState.rtc === "reconnecting" : demoReconnecting;
+  const realAudioDisabled = realMode && !mediaReady(mediaState);
+  const toggleMute = () => {
+    if (realMode) {
+      onToggleMute?.();
+      return;
+    }
+    setMutedLocal(!mutedLocal);
+  };
+  const toggleSpeaker = () => {
+    if (realMode) {
+      onToggleSpeaker?.();
+      return;
+    }
+    setSpeakerLocal(!speakerLocal);
+  };
   return (
     <SafeAreaView style={styles.liveSafe}>
       <View style={styles.live}>
@@ -190,9 +226,9 @@ export function LiveScreen({ onEnd, busy = false, mediaState = demoMediaUiState 
           </View>
         </View>
         <View style={styles.controls} testID="live-controls">
-          <Control disabled={realAudioDisabled} label={muted ? "打开麦克风" : "静音"} icon="♩" onPress={() => setMuted(!muted)} />
-          <Control disabled={realAudioDisabled} label={speaker ? "扬声器开" : "扬声器关"} icon="◖" onPress={() => setSpeaker(!speaker)} />
-          <Control disabled={mediaState.mode === "real"} label="触发重连" icon="•••" onPress={() => setReconnecting(!reconnecting)} testID="reconnect-button" />
+          <Control disabled={realAudioDisabled} label={muted ? "打开麦克风" : "静音"} icon="♩" onPress={toggleMute} />
+          <Control disabled={realAudioDisabled} label={speaker ? "扬声器开" : "扬声器关"} icon="◖" onPress={toggleSpeaker} />
+          <Control disabled={realMode} label="触发重连" icon="•••" onPress={() => setDemoReconnecting(!demoReconnecting)} testID="reconnect-button" />
           <Control danger disabled={busy} label={busy ? "结束中…" : "结束房间"} icon="⌕" onPress={onEnd} testID="end-room-button" />
         </View>
       </View>
@@ -211,7 +247,7 @@ export function ReportScreen({ error, items, onDone, onRetry, mediaState = demoM
     mediaState.report === "ready" &&
     reports.length > 0 &&
     reports.every((item) => item.status === "completed");
-  const showSuccess = mediaState.mode === "demo" || allCompleted;
+  const showSuccess = mediaState.mode === "demo" || (allCompleted && mediaState.recording !== "failed");
   const processingLabels = roomProcessingLabels(mediaState);
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.report}><View style={styles.reportHeader}><Text style={styles.back}>‹</Text><View><Text style={styles.reportTitle}>本局英语报告</Text><Text style={styles.legacyReport}>本局口语报告</Text></View><View /></View><Text style={styles.reportSub}>⌁  雾港疑云 · 25 分钟  ⌁</Text><View style={styles.infoCard}><View style={styles.infoImage}/><View><Text style={styles.infoName}>雾港疑云</Text><Text style={styles.infoMeta}>♧ 4 人房间　◷ 25 分钟　▣ 2025/05/18</Text></View></View>
     {processingLabels.length ? <View style={styles.processingStrip}>{processingLabels.map((label) => <Text key={label} style={styles.processingText}>{label}</Text>)}</View> : null}<View style={styles.scoreCard}><View style={styles.scoreCircle}><Text style={styles.scoreNumber}>{reports.find((item) => item.status === "completed")?.score ?? "—"}</Text></View><View><Text style={styles.scoreFor}>本局口语评分</Text><Text style={styles.excellent}>{showSuccess ? "表现优秀" : "等待全员评分完成"}</Text></View></View><View style={styles.metrics}>{[["发音", reports[0]?.pronunciation], ["流利度", reports[0]?.fluency], ["完整度", reports[0]?.score], ["词汇", reports[0]?.score]].map(([label, score]) => <View key={label} style={styles.metric}><Text>{label}</Text><Text style={styles.metricScore}>{score ?? "—"}</Text><View style={styles.metricBar}/></View>)}</View>{error ? <Text accessibilityLabel="报告错误">{error}</Text> : null}<Text style={styles.resultTitle}>玩家结果</Text>{reports.map((item, index) => <View key={item.scoreJobId} style={styles.reportRow}><View style={styles.resultAvatar}><Text>{index + 1}</Text></View><Text style={styles.resultName}>{friendlyName(item.playerName)}</Text><Text style={[styles.resultState, item.status === "failed" && styles.failed]}>{statusText(item.status)}</Text>{item.status === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => onRetry(item)}><Text style={styles.retry}>重新提交</Text></Pressable> : <Text style={styles.resultScore}>{item.status === "completed" ? item.score ?? "—" : "—"}</Text>}</View>)}<Pressable accessibilityLabel="回到大厅" onPress={onDone} style={styles.return}><Text style={styles.returnText}>返回大厅</Text></Pressable></ScrollView></SafeAreaView>;

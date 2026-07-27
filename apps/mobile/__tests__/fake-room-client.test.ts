@@ -13,6 +13,7 @@ describe("FakeRoomClient", () => {
       end: "/v1/rooms/{id}/end",
       report: "/v1/rooms/{id}/report",
       retry: "/v1/score-jobs/{id}/retry",
+      rtcGrants: "/v1/rooms/{id}/rtc-grants",
     });
   });
 

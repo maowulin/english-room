@@ -1,10 +1,12 @@
+import type { RtcGrantCredentials } from "@/services/rtc-client";
+
 export type GuestSession = { playerId: string; nickname: string };
 export type RoomMember = { playerId: string; ready: boolean };
 export type Room = {
   id: string;
   code: string;
   title: string;
-  status: "waiting" | "live" | "ended";
+  status: "waiting" | "live" | "ended" | "recording_failed";
   version?: number;
   members: RoomMember[];
 };
@@ -30,6 +32,7 @@ export const roomApiPaths = {
   end: "/v1/rooms/{id}/end",
   report: "/v1/rooms/{id}/report",
   retry: "/v1/score-jobs/{id}/retry",
+  rtcGrants: "/v1/rooms/{id}/rtc-grants",
 } as const;
 
 export interface RoomClient {
@@ -43,6 +46,7 @@ export interface RoomClient {
   endRoom(roomId: string): Promise<Room>;
   getRoomReport(roomId: string): Promise<RoomReport>;
   retryScoreJob(scoreJobId: string): Promise<ReportItem>;
+  issueRtcGrant(roomId: string): Promise<RtcGrantCredentials>;
 }
 
 export class FakeRoomClient implements RoomClient {
@@ -129,6 +133,20 @@ export class FakeRoomClient implements RoomClient {
     }
     throw new Error("评分任务不存在");
   }
+
+  async issueRtcGrant(roomId: string): Promise<RtcGrantCredentials> {
+    const room = await this.getRoom(roomId);
+    return {
+      roomId: room.id,
+      strRoomId: room.id,
+      playerId: room.members[0]?.playerId ?? "demo-player",
+      trtcUserId: "u_demo",
+      sdkAppId: 14000000,
+      userSig: "demo-fake-usersig",
+      expiresAt: Math.floor(Date.now() / 1000) + 600,
+      ttlSeconds: 600,
+    };
+  }
 }
 
 type HttpRoomClientOptions = {
@@ -158,6 +176,7 @@ export function mapBackendRoomStatus(status: string): Room["status"] {
   if (status === "lobby" || status === "waiting") return "waiting";
   if (status === "live" || status === "active") return "live";
   if (status === "processing" || status === "ended") return "ended";
+  if (status === "recording_failed") return "recording_failed";
   throw new Error(`未知房间状态：${status}`);
 }
 
@@ -202,6 +221,28 @@ export class HttpRoomClient implements RoomClient {
   async retryScoreJob(scoreJobId: string): Promise<ReportItem> {
     const job = await this.request(`/v1/score-jobs/${scoreJobId}/retry`, { method: "POST" }) as { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number> };
     return this.mapReportItem(job);
+  }
+  async issueRtcGrant(roomId: string): Promise<RtcGrantCredentials> {
+    const payload = await this.request(`/v1/rooms/${roomId}/rtc-grants`, { method: "POST" }) as {
+      room_id: string;
+      str_room_id: string;
+      player_id: string;
+      trtc_user_id: string;
+      sdk_app_id: number;
+      user_sig: string;
+      expires_at: number;
+      ttl_seconds: number;
+    };
+    return {
+      roomId: payload.room_id,
+      strRoomId: payload.str_room_id,
+      playerId: payload.player_id,
+      trtcUserId: payload.trtc_user_id,
+      sdkAppId: payload.sdk_app_id,
+      userSig: payload.user_sig,
+      expiresAt: payload.expires_at,
+      ttlSeconds: payload.ttl_seconds,
+    };
   }
   private mapReportItem(job: { score_job_id: string; player_id: string; status: string; scores?: Record<string, number>; recognized_text?: string }): ReportItem {
     const status = job.status === "success" ? "completed" : job.status;

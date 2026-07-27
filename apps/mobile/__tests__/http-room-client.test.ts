@@ -18,6 +18,7 @@ describe("HttpRoomClient", () => {
     expect(mapBackendRoomStatus("active")).toBe("live");
     expect(mapBackendRoomStatus("processing")).toBe("ended");
     expect(mapBackendRoomStatus("ended")).toBe("ended");
+    expect(mapBackendRoomStatus("recording_failed")).toBe("recording_failed");
     expect(() => mapBackendRoomStatus("scoring")).toThrow("未知房间状态：scoring");
   });
 

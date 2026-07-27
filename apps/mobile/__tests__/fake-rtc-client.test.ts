@@ -10,6 +10,7 @@ it("tracks mute and reconnection visual state without a native RTC SDK", async (
   expect(rtc.getState()).toEqual({
     joined: true,
     muted: true,
+    speakerOn: true,
     connection: "reconnecting",
   });
 });
