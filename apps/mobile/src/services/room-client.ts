@@ -36,6 +36,8 @@ export const roomApiPaths = {
 } as const;
 
 export interface RoomClient {
+  /** Returns the bearer token for authorized API/WebSocket calls; never log or render this value. */
+  getAccessToken?(): string | undefined;
   createGuestSession(input: { nickname: string }): Promise<GuestSession>;
   createRoom(input: { title: string }): Promise<Room>;
   getRoomByCode(code: string): Promise<Room>;
@@ -153,6 +155,7 @@ type HttpRoomClientOptions = {
   baseUrl: string;
   fetcher?: typeof fetch;
   idGenerator?: () => string;
+  accessToken?: string;
 };
 
 type RoomSnapshot = {
@@ -191,12 +194,22 @@ export class HttpRoomClient implements RoomClient {
   private token?: string;
   private versions = new Map<string, number>();
 
-  constructor({ baseUrl, fetcher, idGenerator = () => `${Date.now()}-${Math.random()}` }: HttpRoomClientOptions) {
+  constructor({
+    baseUrl,
+    fetcher,
+    idGenerator = () => `${Date.now()}-${Math.random()}`,
+    accessToken,
+  }: HttpRoomClientOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     const runtimeFetch = fetcher ?? globalThis.fetch?.bind(globalThis);
     if (!runtimeFetch) throw new Error("当前运行环境未提供 globalThis.fetch，无法请求 API");
     this.fetcher = runtimeFetch;
     this.idGenerator = idGenerator;
+    if (accessToken) this.token = accessToken;
+  }
+
+  getAccessToken(): string | undefined {
+    return this.token;
   }
 
   async createGuestSession(input: { nickname: string }): Promise<GuestSession> {

@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   PermissionsAndroid,
   Platform,
@@ -25,6 +25,7 @@ import {
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 import { HttpRoomClient, type RoomClient, type ReportItem, type RoomMember } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
+import { RoomRealtimeClient, type RoomRealtimeClientFactory } from "@/services/realtime-client";
 import { createRtcClient } from "@/services/rtc-factory";
 import { resolveMediaMode, type RtcClient } from "@/services/rtc-client";
 
@@ -45,6 +46,14 @@ function mapRoomMembers(members: RoomMember[], player?: { id: string; nickname: 
     ready: member.ready,
   }));
 }
+
+function readRoomAccessToken(client: RoomClient): string | undefined {
+  const reader = client.getAccessToken;
+  if (typeof reader !== "function") return undefined;
+  return reader.call(client);
+}
+
+const defaultRealtimeClientFactory: RoomRealtimeClientFactory = () => new RoomRealtimeClient();
 
 function rtcTerminalFailure(rtc: MediaUiState["rtc"]) {
   return rtc === "disconnected" || rtc === "kicked" || rtc === "joinFailed";
@@ -182,9 +191,20 @@ export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone:
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
 }
 
-export function RoomApp({ client: injectedClient, mediaState: injectedMediaState }: { client?: RoomClient; mediaState?: MediaUiState }) {
+export function RoomApp({
+  client: injectedClient,
+  mediaState: injectedMediaState,
+  realtimeClientFactory = defaultRealtimeClientFactory,
+}: {
+  client?: RoomClient;
+  mediaState?: MediaUiState;
+  realtimeClientFactory?: RoomRealtimeClientFactory;
+}) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
-  const client = useRef<RoomClient>(injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() })).current;
+  const client = useMemo(
+    () => injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() }),
+    [injectedClient],
+  );
   const mediaMode = resolveMediaMode(process.env, Platform.OS);
   const rtcRef = useRef<RtcClient | null>(null);
   const [liveMedia, setLiveMedia] = useState<MediaUiState>(
@@ -199,9 +219,39 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
   const [reportItems, setReportItems] = useState<ReportItem[]>([]);
   const [reportError, setReportError] = useState<string>();
   const playerRef = useRef(state.player);
+  const realtimeRef = useRef<ReturnType<RoomRealtimeClientFactory> | null>(null);
   useEffect(() => {
     playerRef.current = state.player;
   }, [state.player]);
+  const roomId = state.room?.id;
+  useEffect(() => {
+    if (!roomId) return;
+    const accessToken = readRoomAccessToken(client);
+    if (!accessToken) return;
+
+    const realtime = realtimeClientFactory();
+    realtimeRef.current = realtime;
+    const unsubscribeUpdates = realtime.subscribe((update) => {
+      if (update.type !== "room.snapshot" && update.type !== "room.updated") return;
+      dispatch({
+        type: "roomMembersUpdated",
+        members: mapRoomMembers(update.room.members, playerRef.current),
+      });
+    });
+    const unsubscribeProtocolErrors = realtime.subscribeProtocolErrors(() => {
+      // Protocol / transport errors stay inside RoomRealtimeClient; do not block REST or fake TRTC state.
+    });
+    realtime.connect({ roomId, accessToken });
+
+    return () => {
+      unsubscribeUpdates();
+      unsubscribeProtocolErrors();
+      realtime.close();
+      if (realtimeRef.current === realtime) {
+        realtimeRef.current = null;
+      }
+    };
+  }, [roomId, client, realtimeClientFactory]);
   useEffect(() => {
     if (injectedMediaState || mediaMode !== "real") return;
     let active = true;
@@ -333,6 +383,8 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
   };
   const leaveSession = () => {
     const rtc = rtcRef.current;
+    realtimeRef.current?.close();
+    realtimeRef.current = null;
     dispatch({ type: "leaveRoom" });
     setRemoteSeats([]);
     if (!injectedMediaState) {
@@ -408,7 +460,6 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
       .catch(fail)
       .finally(() => setBusy(false));
   };
-  const roomId = state.room?.id;
   const ready = () => {
     if (!roomId || busy) return;
     setApiError(undefined);

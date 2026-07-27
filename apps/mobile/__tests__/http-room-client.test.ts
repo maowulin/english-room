@@ -34,6 +34,7 @@ describe("HttpRoomClient", () => {
     const client = new HttpRoomClient({ baseUrl: "http://api/", fetcher, idGenerator: () => "key-1" });
 
     await expect(client.createGuestSession({ nickname: "Mint" })).resolves.toEqual({ playerId: "p1", nickname: "Mint" });
+    expect(client.getAccessToken()).toBe("token");
     const room = await client.createRoom({ title: "雾港疑云" });
     expect(room).toMatchObject({ id: "r1", code: "4827", version: 3, status: "waiting" });
     await expect(client.getRoomByCode("4827")).resolves.toMatchObject({ id: "r1", code: "4827", status: "waiting" });

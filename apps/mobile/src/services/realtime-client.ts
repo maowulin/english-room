@@ -59,6 +59,15 @@ export type RoomRealtimeClientOptions = {
   webSocketFactory?: WebSocketFactory;
 };
 
+export type RoomRealtimeClientLike = {
+  connect(input: { roomId: string; accessToken: string }): void;
+  subscribe(listener: Listener<RoomRealtimeUpdate>): () => void;
+  subscribeProtocolErrors(listener: Listener<string>): () => void;
+  close(): void;
+};
+
+export type RoomRealtimeClientFactory = () => RoomRealtimeClientLike;
+
 type Listener<T> = (value: T) => void;
 
 function defaultWebSocketFactory(
