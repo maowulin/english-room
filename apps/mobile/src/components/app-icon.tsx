@@ -122,13 +122,13 @@ export function AppIcon({
   const Icon = ICONS[name];
   return (
     <Icon
-      accessible={!decorative}
       color={color}
       size={size}
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth={strokeWidth}
       testID={testID}
+      {...(decorative ? {} : { accessible: true })}
     />
   );
 }
