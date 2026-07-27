@@ -3,6 +3,7 @@ import {
   Apple,
   ArrowLeft,
   BookOpen,
+  Calendar,
   Check,
   ChevronRight,
   CircleAlert,
@@ -19,6 +20,7 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  PhoneOff,
   RefreshCw,
   Share2,
   Signal,
@@ -37,6 +39,7 @@ export type AppIconName =
   | "apple"
   | "arrow-left"
   | "book-open"
+  | "calendar"
   | "check"
   | "chevron-right"
   | "clock"
@@ -52,6 +55,7 @@ export type AppIconName =
   | "mic"
   | "mic-off"
   | "more"
+  | "phone-off"
   | "refresh"
   | "share"
   | "signal"
@@ -72,6 +76,7 @@ const ICONS = {
   apple: Apple,
   "arrow-left": ArrowLeft,
   "book-open": BookOpen,
+  calendar: Calendar,
   check: Check,
   "chevron-right": ChevronRight,
   clock: Clock3,
@@ -87,6 +92,7 @@ const ICONS = {
   mic: Mic,
   "mic-off": MicOff,
   more: Ellipsis,
+  "phone-off": PhoneOff,
   refresh: RefreshCw,
   share: Share2,
   signal: Signal,
