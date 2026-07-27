@@ -1,5 +1,7 @@
 import {
   RoomRealtimeClient,
+  ROOM_EVENTS_WEBSOCKET_BEARER_SUBPROTOCOL,
+  buildRoomEventsWebSocketAuthProtocols,
   buildRoomEventsWebSocketUrl,
   httpApiBaseUrlToWebSocketBaseUrl,
   type RoomRealtimeUpdate,
@@ -90,8 +92,17 @@ describe("buildRoomEventsWebSocketUrl", () => {
   });
 });
 
+describe("buildRoomEventsWebSocketAuthProtocols", () => {
+  it("includes the stable bearer subprotocol marker and access token for browser WebSocket auth", () => {
+    expect(buildRoomEventsWebSocketAuthProtocols("token-abc")).toEqual([
+      ROOM_EVENTS_WEBSOCKET_BEARER_SUBPROTOCOL,
+      "token-abc",
+    ]);
+  });
+});
+
 describe("RoomRealtimeClient", () => {
-  it("connects with room id, ws URL, and Bearer token headers for React Native", () => {
+  it("connects with bearer subprotocols for Expo Web and Authorization headers for native", () => {
     const { factory, latest } = createMockWebSocketFactory();
     const client = new RoomRealtimeClient({
       apiBaseUrl: "https://api.test/",
@@ -103,6 +114,7 @@ describe("RoomRealtimeClient", () => {
     expect(factory).toHaveBeenCalledTimes(1);
     const socket = latest();
     expect(socket?.url).toBe("wss://api.test/v1/rooms/room-1/events");
+    expect(socket?.protocols).toEqual(buildRoomEventsWebSocketAuthProtocols("token-abc"));
     expect(socket?.options).toEqual({
       headers: { Authorization: "Bearer token-abc" },
     });

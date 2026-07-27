@@ -7,6 +7,13 @@ import { mapBackendRoomStatus } from "@/services/room-client";
 
 export { buildRoomEventsWebSocketUrl, httpApiBaseUrlToWebSocketBaseUrl };
 
+/** Sec-WebSocket-Protocol marker paired with the access token for browser WebSocket auth. */
+export const ROOM_EVENTS_WEBSOCKET_BEARER_SUBPROTOCOL = "english-room.bearer";
+
+export function buildRoomEventsWebSocketAuthProtocols(accessToken: string): string[] {
+  return [ROOM_EVENTS_WEBSOCKET_BEARER_SUBPROTOCOL, accessToken];
+}
+
 export type WebSocketConnectOptions = {
   headers?: Record<string, string>;
 };
@@ -157,7 +164,7 @@ export class RoomRealtimeClient {
     this.detachSocket();
 
     const url = buildRoomEventsWebSocketUrl(this.apiBaseUrl, input.roomId);
-    const socket = this.webSocketFactory(url, null, {
+    const socket = this.webSocketFactory(url, buildRoomEventsWebSocketAuthProtocols(input.accessToken), {
       headers: { Authorization: `Bearer ${input.accessToken}` },
     });
     this.socket = socket;
