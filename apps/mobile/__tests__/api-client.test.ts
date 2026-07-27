@@ -1,6 +1,15 @@
-import { ApiClient } from "@/services/api-client";
+import {
+  ApiClient,
+  DEFAULT_ANALYTICS_TIMEOUT_MS,
+} from "@/services/api-client";
+import { ANALYTICS_FLUSH_INTERVAL_MS } from "@/analytics/analytics-client";
 
 describe("ApiClient", () => {
+  it("uses the analytics contract timeout without changing client flush cadence", () => {
+    expect(DEFAULT_ANALYTICS_TIMEOUT_MS).toBe(3_000);
+    expect(ANALYTICS_FLUSH_INTERVAL_MS).toBe(10_000);
+  });
+
   it("returns the FastAPI health status", async () => {
     const fetcher = jest.fn<Promise<Response>, [RequestInfo | URL]>();
     fetcher.mockResolvedValue({

@@ -47,7 +47,7 @@ type ApiClientOptions = {
   analyticsTimeoutMs?: number;
 };
 
-export const DEFAULT_ANALYTICS_TIMEOUT_MS = 10_000;
+export const DEFAULT_ANALYTICS_TIMEOUT_MS = 3_000;
 
 function normalizeAnalyticsTimeout(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0

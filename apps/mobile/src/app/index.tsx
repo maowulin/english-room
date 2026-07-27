@@ -4,7 +4,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DemoStatusCard } from "@/components/demo-status-card";
 import {
-  getDefaultAnalyticsClient,
   noopAnalyticsClient,
   useAnalyticsLifecycle,
   type AnalyticsLifecycleClient,
@@ -136,7 +135,7 @@ export function DemoScreen({
 }
 
 export default function HomeScreen() {
-  return <DemoScreen analyticsClient={getDefaultAnalyticsClient()} />;
+  return <DemoScreen />;
 }
 
 const styles = StyleSheet.create({
