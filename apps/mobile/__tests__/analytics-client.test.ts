@@ -147,6 +147,10 @@ describe("analytics event catalog", () => {
       "rtc_connection_changed",
       { connection_state: "failed", failure_code },
     ] as [AnalyticsEventName, Record<string, unknown>]),
+    ...["provider_timeout", "rtc_unavailable"].map((failure_code) => [
+      "rtc_connection_changed",
+      { connection_state: "failed", failure_code },
+    ] as [AnalyticsEventName, Record<string, unknown>]),
     ...["ready", "not_ready", "blocked", "pending"].map((ready_state) => [
       "room_ready_changed",
       { ready_state, member_count: 1 },
@@ -223,7 +227,15 @@ describe("analytics event catalog", () => {
     ["end_reason", { room_role: "member", room_duration_ms: 1, end_reason: "other" }],
     ["handoff_source", { handoff_source: "unknown", auth_mode: "guest" }],
     ["retry_reason", { score_job_state: "failed", retry_reason: "raw_error" }],
+    ["failure_code", { connection_state: "failed", failure_code: "" }],
     ["failure_code", { connection_state: "failed", failure_code: "RAW ERROR" }],
+    ["failure_code", { connection_state: "failed", failure_code: "token_expired" }],
+    ["failure_code", { connection_state: "failed", failure_code: "ops_email" }],
+    ["failure_code", { connection_state: "failed", failure_code: "ip_10_0_0_1" }],
+    [
+      "failure_code",
+      { connection_state: "failed", failure_code: "https://example.com" },
+    ],
   ] as const)("rejects unknown value for %s", (eventName, properties) => {
     const eventNamesByProperty: Record<string, AnalyticsEventName> = {
       entry_source: "app_opened",
@@ -334,7 +346,7 @@ describe("AnalyticsClient identity and queue", () => {
       platform: "ios",
     });
     await client.startSession();
-    client.track("app_opened", { entry_source: "cold_start" });
+    client.track("app_opened", { entry_source: "warm_resume" });
     await client.flush("manual");
 
     const [events] = transport.mock.calls[0] as [Array<Record<string, unknown>>];
@@ -347,7 +359,7 @@ describe("AnalyticsClient identity and queue", () => {
       environment: "local",
       platform: "ios",
       app_version: "1.2.3",
-      properties: { entry_source: "cold_start" },
+      properties: { entry_source: "warm_resume" },
     });
     expect(events[0].event_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -423,9 +435,25 @@ describe("AnalyticsClient retry policy", () => {
 
     await client.flush("manual");
 
-    expect(transport).toHaveBeenCalledTimes(4);
+    expect(transport).toHaveBeenCalledTimes(1);
     expect(client.getQueueLength()).toBe(0);
     expect(client.getDiagnostics()).toEqual({ droppedCount: 2, rejectedCount: 0 });
+  });
+
+  it("drops a malformed response schema once without retrying or exposing its body", async () => {
+    const transport = jest.fn().mockResolvedValue({
+      accepted: "not-a-count",
+      body: "private raw response",
+    });
+    const client = createClient(transport);
+    await client.startSession();
+    client.track("app_opened", { entry_source: "cold_start" });
+
+    await client.flush("manual");
+
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(client.getQueueLength()).toBe(0);
+    expect(client.getDiagnostics()).toEqual({ droppedCount: 1, rejectedCount: 0 });
   });
 
   it("records rejected events before removing a completely accounted batch", async () => {

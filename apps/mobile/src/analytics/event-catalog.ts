@@ -17,6 +17,7 @@ export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
 
 export type AnalyticsPlatform = "ios" | "android" | "web";
 export type AnalyticsEnvironment = "local";
+export type AnalyticsFailureCode = string;
 
 type AnalyticsEventPropertiesMap = {
   app_opened: {
@@ -63,12 +64,7 @@ type AnalyticsEventPropertiesMap = {
       | "reconnecting"
       | "disconnected"
       | "failed";
-    failure_code:
-      | "network_timeout"
-      | "network_error"
-      | "permission_denied"
-      | "provider_error"
-      | "unknown";
+    failure_code: AnalyticsFailureCode;
   };
   room_ended: {
     room_role: "host" | "member" | "guest";
@@ -92,12 +88,7 @@ type AnalyticsEventPropertiesMap = {
       | "starting"
       | "paused"
       | "stopped";
-    failure_code:
-      | "network_timeout"
-      | "network_error"
-      | "permission_denied"
-      | "provider_error"
-      | "unknown";
+    failure_code: AnalyticsFailureCode;
   };
   score_report_viewed: {
     score_job_state:
@@ -224,20 +215,15 @@ function isDuration(value: unknown): value is number {
   );
 }
 
-const FAILURE_CODES = [
-  "network_timeout",
-  "network_error",
-  "permission_denied",
-  "provider_error",
-  "unknown",
-] as const;
 const SAFE_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const SENSITIVE_CODE_PATTERN =
+  /(token|secret|cookie|bearer|usersig|password|credential|authorization|email|phone|ip)/i;
 
 function isFailureCode(value: unknown): boolean {
   return (
     typeof value === "string" &&
     SAFE_CODE_PATTERN.test(value) &&
-    (FAILURE_CODES as readonly string[]).includes(value)
+    !SENSITIVE_CODE_PATTERN.test(value)
   );
 }
 

@@ -154,6 +154,39 @@ function isRetryableError(error: unknown): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+class AnalyticsResponseError extends Error {
+  readonly retryable = false;
+
+  constructor() {
+    super("埋点响应格式或计数无效");
+    this.name = "AnalyticsResponseError";
+  }
+}
+
+function isAnalyticsEventsResponse(
+  value: unknown,
+): value is AnalyticsEventsResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    Number.isInteger(candidate.accepted) &&
+    Number.isInteger(candidate.duplicates) &&
+    Number.isInteger(candidate.rejected) &&
+    typeof candidate.accepted === "number" &&
+    typeof candidate.duplicates === "number" &&
+    typeof candidate.rejected === "number" &&
+    candidate.accepted >= 0 &&
+    candidate.duplicates >= 0 &&
+    candidate.rejected >= 0 &&
+    typeof candidate.request_id === "string" &&
+    candidate.request_id.length > 0 &&
+    candidate.request_id.length <= 128
+  );
+}
+
 export class AnalyticsClient {
   private readonly transport: AnalyticsTransport;
   private readonly keyValueStore: AnalyticsKeyValueStore;
@@ -341,16 +374,15 @@ export class AnalyticsClient {
             ? await this.transport(batch)
             : await this.transport.sendAnalyticsEvents(batch);
 
+        if (!isAnalyticsEventsResponse(response)) {
+          throw new AnalyticsResponseError();
+        }
+
         if (
-          !Number.isInteger(response.accepted) ||
-          !Number.isInteger(response.duplicates) ||
-          !Number.isInteger(response.rejected) ||
-          response.accepted < 0 ||
-          response.duplicates < 0 ||
-          response.rejected < 0 ||
-          response.accepted + response.duplicates + response.rejected !== batch.length
+          response.accepted + response.duplicates + response.rejected !==
+          batch.length
         ) {
-          throw new Error("埋点响应计数不完整");
+          throw new AnalyticsResponseError();
         }
 
         if (response.rejected > 0) {
