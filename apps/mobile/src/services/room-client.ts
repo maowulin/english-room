@@ -192,6 +192,7 @@ export class HttpRoomClient implements RoomClient {
   private readonly fetcher: typeof fetch;
   private readonly idGenerator: () => string;
   private token?: string;
+  private playerId?: string;
   private versions = new Map<string, number>();
 
   constructor({
@@ -212,8 +213,13 @@ export class HttpRoomClient implements RoomClient {
     return this.token;
   }
 
+  getPlayerId(): string | undefined {
+    return this.playerId;
+  }
+
   async createGuestSession(input: { nickname: string }): Promise<GuestSession> {
     const payload = await this.request("/v1/guest-sessions", { method: "POST", body: JSON.stringify({ display_name: input.nickname }) }, false) as { player_id: string; access_token: string; profile: { display_name: string } };
+    this.playerId = payload.player_id;
     this.token = payload.access_token;
     return { playerId: payload.player_id, nickname: payload.profile.display_name };
   }

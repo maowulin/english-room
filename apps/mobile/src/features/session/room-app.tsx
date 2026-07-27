@@ -261,8 +261,9 @@ export function RoomApp({
   );
   const analyticsEvents = useMemo(
     () =>
-      injectedAnalyticsEvents ?? analyticsEventsFactory(client, appSessionId),
-    [injectedAnalyticsEvents, analyticsEventsFactory, client, appSessionId],
+      injectedAnalyticsEvents ??
+      analyticsEventsFactory(client, appSessionId, state.player?.id),
+    [injectedAnalyticsEvents, analyticsEventsFactory, client, appSessionId, state.player?.id],
   );
   const mediaMode = resolveMediaMode(process.env, Platform.OS);
   const rtcRef = useRef<RtcClient | null>(null);

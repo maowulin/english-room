@@ -2,7 +2,8 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 
 import { RoomApp } from "@/features/session/room-app";
 import { AnalyticsEvents } from "@/services/analytics-events";
-import { FakeRoomClient } from "@/services/room-client";
+import { getOrCreateAnalyticsUserId } from "@/services/analytics-factory";
+import { FakeRoomClient, HttpRoomClient } from "@/services/room-client";
 
 function createAnalyticsSpy() {
   return {
@@ -27,6 +28,64 @@ function wrapAnalytics(spy: ReturnType<typeof createAnalyticsSpy>): AnalyticsEve
 
 describe("RoomApp analytics", () => {
   afterEach(cleanup);
+
+  it("HttpRoomClient login sends guest_session_created with wire user_id matching player_id", async () => {
+    const playerId = "player-room-app-99";
+    const anonymousUserId = getOrCreateAnalyticsUserId();
+    const previousApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+    process.env.EXPO_PUBLIC_API_BASE_URL = "http://api.example";
+    try {
+      const fetcher = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/guest-sessions")) {
+          return {
+            ok: true,
+            json: async () => ({
+              player_id: playerId,
+              access_token: "room-app-token",
+              profile: { display_name: "Mint" },
+            }),
+          } as Response;
+        }
+        if (url.includes("/v1/analytics/events")) {
+          return { ok: true, status: 202 } as Response;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+      jest.spyOn(globalThis, "fetch").mockImplementation(fetcher as typeof fetch);
+
+      const view = await render(
+        <RoomApp client={new HttpRoomClient({ baseUrl: "http://api.example", fetcher: fetcher as typeof fetch })} />,
+      );
+
+      await act(async () => {
+        fireEvent.press(view.getByTestId("login-button"));
+      });
+
+      await act(async () => {
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      });
+
+      const analyticsCalls = fetcher.mock.calls.filter(([url]) =>
+        String(url).includes("/v1/analytics/events"),
+      );
+      expect(analyticsCalls.length).toBeGreaterThanOrEqual(1);
+      const init = analyticsCalls[0][1] as RequestInit;
+      const body = JSON.parse(String(init.body)) as {
+        events: { event_name: string; user_id: string; properties: { player_id?: string } }[];
+      };
+      const guestEvent = body.events.find((event) => event.event_name === "guest_session_created");
+      expect(guestEvent).toBeDefined();
+      expect(guestEvent?.user_id).toBe(playerId);
+      expect(guestEvent?.user_id).not.toBe(anonymousUserId);
+      expect(guestEvent?.properties.player_id).toBe(playerId);
+      expect(String(init.body)).not.toMatch(/room-app-token|Mint/i);
+    } finally {
+      process.env.EXPO_PUBLIC_API_BASE_URL = previousApiBaseUrl;
+      jest.restoreAllMocks();
+    }
+  });
 
   it("does not call global fetch when using FakeRoomClient without HTTP transport", async () => {
     const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(() => {

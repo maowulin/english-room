@@ -44,9 +44,12 @@ function resolveAnalyticsPlatform(): AnalyticsPlatform {
   return Platform.OS === "android" ? "android" : "ios";
 }
 
-export function createAnalyticsContext(appSessionId: string): AnalyticsContextFields {
+export function createAnalyticsContext(
+  appSessionId: string,
+  userId?: string,
+): AnalyticsContextFields {
   return {
-    userId: getOrCreateAnalyticsUserId(),
+    userId: userId ?? getOrCreateAnalyticsUserId(),
     appSessionId,
     environment: resolveAnalyticsEnvironment(),
     platform: resolveAnalyticsPlatform(),
@@ -69,13 +72,23 @@ export function createNoopAnalyticsEvents(appSessionId: string): AnalyticsEvents
   );
 }
 
+function resolveHttpAnalyticsUserId(
+  client: HttpRoomClient,
+  playerId?: string,
+): () => string | undefined {
+  return () => playerId?.trim() || client.getPlayerId()?.trim() || undefined;
+}
+
 export function createHttpAnalyticsEvents(
   client: HttpRoomClient,
   appSessionId: string,
+  playerId?: string,
 ): AnalyticsEvents {
+  const resolveUserId = resolveHttpAnalyticsUserId(client, playerId);
   return new AnalyticsEvents(
     new AnalyticsClient({
-      context: createAnalyticsContext(appSessionId),
+      context: createAnalyticsContext(appSessionId, playerId ?? ""),
+      resolveUserId,
       transport: createHttpAnalyticsTransport({
         baseUrl: resolveApiBaseUrl(),
         getAccessToken: () => client.getAccessToken(),
@@ -87,11 +100,12 @@ export function createHttpAnalyticsEvents(
 export type AnalyticsEventsFactory = (
   client: RoomClient,
   appSessionId: string,
+  playerId?: string,
 ) => AnalyticsEvents;
 
-export const defaultAnalyticsEventsFactory: AnalyticsEventsFactory = (client, appSessionId) => {
+export const defaultAnalyticsEventsFactory: AnalyticsEventsFactory = (client, appSessionId, playerId) => {
   if (client instanceof HttpRoomClient) {
-    return createHttpAnalyticsEvents(client, appSessionId);
+    return createHttpAnalyticsEvents(client, appSessionId, playerId);
   }
   return createNoopAnalyticsEvents(appSessionId);
 };

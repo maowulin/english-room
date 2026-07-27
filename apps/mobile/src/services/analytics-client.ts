@@ -198,6 +198,7 @@ export type AnalyticsTransport = (
 type AnalyticsClientOptions = {
   context: AnalyticsContextFields;
   transport?: AnalyticsTransport;
+  resolveUserId?: () => string | undefined;
 };
 
 const SENSITIVE_FIELD_KEYS = new Set([
@@ -294,13 +295,14 @@ function buildWireRecord(
   context: AnalyticsContextFields,
   event: AnalyticsEvent,
   properties: Record<string, unknown>,
+  userId: string,
   options?: AnalyticsSubmitOptions,
 ): AnalyticsRecord {
   const record: AnalyticsRecord = {
     event_id: createEventId(options?.eventId),
     event_name: event.name,
     schema_version: ANALYTICS_SCHEMA_VERSION,
-    user_id: context.userId,
+    user_id: userId,
     app_session_id: context.appSessionId,
     occurred_at: options?.occurredAt ?? new Date().toISOString(),
     app_version: context.appVersion,
@@ -320,10 +322,12 @@ function buildWireRecord(
 export class AnalyticsClient {
   private readonly context: AnalyticsContextFields;
   private readonly transport: AnalyticsTransport;
+  private readonly resolveUserId?: () => string | undefined;
 
-  constructor({ context, transport = noopTransport }: AnalyticsClientOptions) {
+  constructor({ context, transport = noopTransport, resolveUserId }: AnalyticsClientOptions) {
     this.context = context;
     this.transport = transport;
+    this.resolveUserId = resolveUserId;
   }
 
   async submit(
@@ -340,7 +344,12 @@ export class AnalyticsClient {
         };
       }
 
-      const record = buildWireRecord(this.context, event, properties, options);
+      const userId = this.resolveUserId?.()?.trim() || this.context.userId.trim();
+      if (!userId) {
+        return { accepted: false, reason: "缺少 user_id" };
+      }
+
+      const record = buildWireRecord(this.context, event, properties, userId, options);
 
       await Promise.resolve(this.transport(record));
       return { accepted: true };
