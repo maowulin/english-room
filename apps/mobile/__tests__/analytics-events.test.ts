@@ -1,13 +1,13 @@
 import {
   AnalyticsClient,
-  DEFAULT_ANALYTICS_EVENT_VERSION,
   type AnalyticsContextFields,
   type AnalyticsSubmitResult,
 } from "@/services/analytics-client";
 import { AnalyticsEvents } from "@/services/analytics-events";
 
 const baseContext: AnalyticsContextFields = {
-  eventVersion: DEFAULT_ANALYTICS_EVENT_VERSION,
+  userId: "user-anon-test-001",
+  appSessionId: "app-session-test-001",
   environment: "development",
   platform: "ios",
   appVersion: "1.0.0-test",
@@ -155,6 +155,27 @@ describe("AnalyticsEvents", () => {
     expect(submit).toHaveBeenCalledWith({
       name: "score_retry_requested",
       payload: { roomId: "room-1" },
+    });
+  });
+
+  it("opsHandoffStarted submits ops_handoff_started", () => {
+    const submit = jest.fn<Promise<AnalyticsSubmitResult>, Parameters<AnalyticsClient["submit"]>>();
+    submit.mockResolvedValue({ accepted: true });
+    const events = new AnalyticsEvents({ submit } as unknown as AnalyticsClient);
+
+    events.opsHandoffStarted({
+      buildVariant: "internal_ops",
+      handoffSurface: "ops_webview",
+      entryPoint: "admin_menu",
+    });
+
+    expect(submit).toHaveBeenCalledWith({
+      name: "ops_handoff_started",
+      payload: {
+        buildVariant: "internal_ops",
+        handoffSurface: "ops_webview",
+        entryPoint: "admin_menu",
+      },
     });
   });
 

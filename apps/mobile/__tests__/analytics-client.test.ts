@@ -1,13 +1,14 @@
 import {
+  ANALYTICS_SCHEMA_VERSION,
   AnalyticsClient,
-  DEFAULT_ANALYTICS_EVENT_VERSION,
   type AnalyticsContextFields,
   type AnalyticsRecord,
   type AnalyticsTransport,
 } from "@/services/analytics-client";
 
 const baseContext: AnalyticsContextFields = {
-  eventVersion: DEFAULT_ANALYTICS_EVENT_VERSION,
+  userId: "user-anon-test-001",
+  appSessionId: "app-session-test-001",
   environment: "development",
   platform: "ios",
   appVersion: "1.0.0-test",
@@ -22,7 +23,7 @@ describe("AnalyticsClient", () => {
     ).resolves.toEqual({ accepted: true });
   });
 
-  it("includes context metadata on records sent to transport", async () => {
+  it("emits catalog wire envelope on transport (snake_case, schema 1.0)", async () => {
     const transport = jest.fn<ReturnType<AnalyticsTransport>, Parameters<AnalyticsTransport>>();
     transport.mockResolvedValue(undefined);
     const client = new AnalyticsClient({
@@ -30,20 +31,52 @@ describe("AnalyticsClient", () => {
       transport,
     });
 
-    await client.submit({
-      name: "room_joined",
-      payload: { roomId: "room-42", role: "guest" },
-    });
+    await client.submit(
+      {
+        name: "room_joined",
+        payload: { roomId: "room-42", role: "guest" },
+      },
+      {
+        eventId: "11111111-1111-4111-8111-111111111111",
+        occurredAt: "2026-07-27T01:30:00.000Z",
+        correlationId: "corr-join-1",
+      },
+    );
 
     expect(transport).toHaveBeenCalledTimes(1);
     const record = transport.mock.calls[0][0] as AnalyticsRecord;
-    expect(record.name).toBe("room_joined");
-    expect(record.eventVersion).toBe(DEFAULT_ANALYTICS_EVENT_VERSION);
-    expect(record.environment).toBe("development");
-    expect(record.platform).toBe("ios");
-    expect(record.appVersion).toBe("1.0.0-test");
-    expect(record.payload).toEqual({ roomId: "room-42", role: "guest" });
-    expect(typeof record.occurredAt).toBe("string");
+    expect(record).toEqual({
+      event_id: "11111111-1111-4111-8111-111111111111",
+      event_name: "room_joined",
+      schema_version: ANALYTICS_SCHEMA_VERSION,
+      user_id: "user-anon-test-001",
+      app_session_id: "app-session-test-001",
+      occurred_at: "2026-07-27T01:30:00.000Z",
+      app_version: "1.0.0-test",
+      platform: "ios",
+      environment: "development",
+      producer: "client",
+      correlation_id: "corr-join-1",
+      properties: { roomId: "room-42", role: "guest" },
+    });
+    expect(record).not.toHaveProperty("name");
+    expect(record).not.toHaveProperty("payload");
+    expect(record).not.toHaveProperty("occurredAt");
+    expect(record).not.toHaveProperty("eventVersion");
+  });
+
+  it("generates event_id when not injected", async () => {
+    const transport = jest.fn<ReturnType<AnalyticsTransport>, Parameters<AnalyticsTransport>>();
+    transport.mockResolvedValue(undefined);
+    const client = new AnalyticsClient({ context: baseContext, transport });
+
+    await client.submit({ name: "app_opened", payload: {} });
+
+    const record = transport.mock.calls[0][0] as AnalyticsRecord;
+    expect(typeof record.event_id).toBe("string");
+    expect(record.event_id.length).toBeGreaterThan(0);
+    expect(record.schema_version).toBe("1.0");
+    expect(record.producer).toBe("client");
   });
 
   it("accepts each supported analytics event name", async () => {
@@ -69,13 +102,18 @@ describe("AnalyticsClient", () => {
       },
       { name: "score_report_viewed" as const, payload: { roomId: "r-1" } },
       { name: "score_retry_requested" as const, payload: { roomId: "r-1" } },
-      { name: "ops_handoff_started" as const, payload: { roomId: "r-1" } },
+      { name: "ops_handoff_started" as const, payload: { buildVariant: "internal_ops" } },
     ];
 
     for (const event of events) {
       await expect(client.submit(event)).resolves.toEqual({ accepted: true });
     }
     expect(transport).toHaveBeenCalledTimes(events.length);
+    for (const call of transport.mock.calls) {
+      const record = call[0] as AnalyticsRecord;
+      expect(record.event_name).toBeDefined();
+      expect(record.schema_version).toBe("1.0");
+    }
   });
 
   it.each([
@@ -83,6 +121,11 @@ describe("AnalyticsClient", () => {
     ["password", { password: "secret" }],
     ["userSig", { userSig: "sig-value" }],
     ["accessToken", { accessToken: "token-value" }],
+    ["token", { token: "bearer-secret" }],
+    ["room_code", { room_code: "ABCD-1234" }],
+    ["roomCode", { roomCode: "ABCD-1234" }],
+    ["cookie", { cookie: "session=secret" }],
+    ["secret", { secret: "sdk-secret" }],
     ["audio bytes", { audioBytes: new Uint8Array([1, 2, 3]) }],
   ])("rejects sensitive payload field %s", async (_label, payload) => {
     const transport = jest.fn<ReturnType<AnalyticsTransport>, Parameters<AnalyticsTransport>>();

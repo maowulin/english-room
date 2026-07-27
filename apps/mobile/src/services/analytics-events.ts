@@ -8,6 +8,7 @@ import {
   type RoomReadyChangedPayload,
   type RoomScopedPayload,
   type RtcConnectionChangedPayload,
+  type OpsHandoffStartedPayload,
 } from "@/services/analytics-client";
 
 type AnalyticsEventsClient = Pick<AnalyticsClient, "submit">;
@@ -71,5 +72,9 @@ export class AnalyticsEvents {
 
   scoreRetryRequested(payload?: RoomScopedPayload): void {
     fireAndForgetSubmit(this.client, { name: "score_retry_requested", payload });
+  }
+
+  opsHandoffStarted(payload?: OpsHandoffStartedPayload): void {
+    fireAndForgetSubmit(this.client, { name: "ops_handoff_started", payload });
   }
 }
