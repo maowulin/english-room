@@ -44,25 +44,47 @@ function isAnalyticsEventsResponse(
 type ApiClientOptions = {
   baseUrl: string;
   fetcher?: typeof fetch;
+  analyticsTimeoutMs?: number;
 };
+
+export const DEFAULT_ANALYTICS_TIMEOUT_MS = 10_000;
+
+function normalizeAnalyticsTimeout(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_ANALYTICS_TIMEOUT_MS;
+}
 
 export class ApiClientError extends Error {
   readonly status?: number;
+  readonly retryable: boolean;
 
-  constructor(message: string, status?: number) {
+  constructor(
+    message: string,
+    status?: number,
+    retryable =
+      status === 408 || status === 429 || (status !== undefined && status >= 500),
+  ) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
+    this.retryable = retryable;
   }
 }
 
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
+  private readonly analyticsTimeoutMs: number;
 
-  constructor({ baseUrl, fetcher = fetch }: ApiClientOptions) {
+  constructor({
+    baseUrl,
+    fetcher = fetch,
+    analyticsTimeoutMs = DEFAULT_ANALYTICS_TIMEOUT_MS,
+  }: ApiClientOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.fetcher = fetcher;
+    this.analyticsTimeoutMs = normalizeAnalyticsTimeout(analyticsTimeoutMs);
   }
 
   async getHealth(): Promise<HealthStatus> {
@@ -83,23 +105,58 @@ export class ApiClient {
   async sendAnalyticsEvents(
     events: readonly AnalyticsEvent[],
   ): Promise<AnalyticsEventsResponse> {
-    const response = await this.fetcher(`${this.baseUrl}/v1/analytics/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ events }),
+    const controller =
+      typeof AbortController === "function" ? new AbortController() : null;
+    let didTimeout = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    const request = (async () => {
+      const response = await this.fetcher(`${this.baseUrl}/v1/analytics/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events }),
+        signal: controller?.signal,
+      });
+
+      if (!response.ok) {
+        throw new ApiClientError(
+          `埋点上报失败（HTTP ${response.status}）`,
+          response.status,
+        );
+      }
+
+      const payload: unknown = await response.json();
+      if (!isAnalyticsEventsResponse(payload)) {
+        throw new ApiClientError("埋点上报返回格式无效");
+      }
+      return payload;
+    })();
+
+    const timeout = new Promise<AnalyticsEventsResponse>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        didTimeout = true;
+        controller?.abort();
+        reject(new ApiClientError("埋点请求超时", undefined, true));
+      }, this.analyticsTimeoutMs);
     });
 
-    if (!response.ok) {
-      throw new ApiClientError(
-        `埋点上报失败（HTTP ${response.status}）`,
-        response.status,
-      );
+    try {
+      return await Promise.race([request, timeout]);
+    } catch (error) {
+      if (
+        didTimeout ||
+        (typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          (error as { name?: unknown }).name === "AbortError")
+      ) {
+        throw new ApiClientError("埋点请求超时", undefined, true);
+      }
+      throw error;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
     }
-
-    const payload: unknown = await response.json();
-    if (!isAnalyticsEventsResponse(payload)) {
-      throw new ApiClientError("埋点上报返回格式无效");
-    }
-    return payload;
   }
 }

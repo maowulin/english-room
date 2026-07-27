@@ -115,11 +115,33 @@ describe("ApiClient", () => {
       fetcher,
     });
 
-    await expect(client.sendAnalyticsEvents([])).rejects.toThrow(
-      "埋点上报失败（HTTP 503）",
-    );
+    await expect(client.sendAnalyticsEvents([])).rejects.toMatchObject({
+      message: "埋点上报失败（HTTP 503）",
+      retryable: true,
+    });
     await expect(client.sendAnalyticsEvents([])).rejects.not.toThrow(
       "secret raw response",
     );
+  });
+
+  it("aborts an analytics request after the configured timeout", async () => {
+    const fetcher = jest.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      });
+    });
+    const client = new ApiClient({
+      baseUrl: "http://localhost:8000",
+      fetcher,
+      analyticsTimeoutMs: 1,
+    });
+
+    await expect(client.sendAnalyticsEvents([])).rejects.toMatchObject({
+      name: "ApiClientError",
+      retryable: true,
+    });
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 });

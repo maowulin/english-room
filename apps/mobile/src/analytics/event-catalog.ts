@@ -22,26 +22,38 @@ type AnalyticsEventPropertiesMap = {
   app_opened: {
     app_version?: string;
     platform?: AnalyticsPlatform;
-    entry_source: "cold_start" | "warm_resume";
+    entry_source:
+      | "cold_start"
+      | "warm_resume"
+      | "room_create"
+      | "room_join"
+      | "warm"
+      | "seed_demo";
   };
   guest_session_created: {
     auth_mode: "guest" | "authenticated";
-    entry_source: "cold_start" | "warm_resume" | "room_create" | "room_join";
+    entry_source:
+      | "cold_start"
+      | "warm_resume"
+      | "room_create"
+      | "room_join"
+      | "warm"
+      | "seed_demo";
   };
   room_created: {
-    room_role: "host";
+    room_role: "host" | "member" | "guest";
     member_count: number;
   };
   room_joined: {
-    room_role: "host" | "member";
+    room_role: "host" | "member" | "guest";
     member_count: number;
   };
   room_ready_changed: {
-    ready_state: "ready" | "not_ready" | "blocked";
+    ready_state: "ready" | "not_ready" | "blocked" | "pending";
     member_count: number;
   };
   room_started: {
-    room_role: "host" | "member";
+    room_role: "host" | "member" | "guest";
     member_count: number;
   };
   rtc_connection_changed: {
@@ -59,9 +71,15 @@ type AnalyticsEventPropertiesMap = {
       | "unknown";
   };
   room_ended: {
-    room_role: "host" | "member";
+    room_role: "host" | "member" | "guest";
     room_duration_ms: number;
-    end_reason: "host_action" | "timeout" | "system_failure";
+    end_reason:
+      | "host_action"
+      | "timeout"
+      | "system_failure"
+      | "completed"
+      | "user_left"
+      | "error";
   };
   recording_status_changed: {
     recording_state:
@@ -70,7 +88,10 @@ type AnalyticsEventPropertiesMap = {
       | "stopping"
       | "ready"
       | "failed"
-      | "expired";
+      | "expired"
+      | "starting"
+      | "paused"
+      | "stopped";
     failure_code:
       | "network_timeout"
       | "network_error"
@@ -79,15 +100,48 @@ type AnalyticsEventPropertiesMap = {
       | "unknown";
   };
   score_report_viewed: {
-    score_job_state: "waiting" | "processing" | "success" | "failed";
-    report_section: "overview" | "pronunciation" | "fluency" | "grammar";
+    score_job_state:
+      | "waiting"
+      | "processing"
+      | "success"
+      | "failed"
+      | "pending"
+      | "running"
+      | "succeeded"
+      | "not_started";
+    report_section:
+      | "overview"
+      | "pronunciation"
+      | "fluency"
+      | "grammar"
+      | "summary"
+      | "details";
   };
   score_retry_requested: {
-    score_job_state: "waiting" | "processing" | "success" | "failed";
-    retry_reason: "user_action";
+    score_job_state:
+      | "waiting"
+      | "processing"
+      | "success"
+      | "failed"
+      | "pending"
+      | "running"
+      | "succeeded"
+      | "not_started";
+    retry_reason:
+      | "user_action"
+      | "user_requested"
+      | "failed"
+      | "timeout"
+      | "error";
   };
   ops_handoff_started: {
-    handoff_source: "admin_menu" | "deep_link";
+    handoff_source:
+      | "admin_menu"
+      | "deep_link"
+      | "app"
+      | "ops_button"
+      | "room"
+      | "report";
     auth_mode: "guest" | "authenticated";
   };
 };
@@ -138,12 +192,16 @@ export function isAnalyticsEventName(value: unknown): value is AnalyticsEventNam
   );
 }
 
-function isSafeAppVersion(value: unknown): value is string {
+export function isSafeAppVersion(value: unknown): value is string {
   return typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value);
 }
 
-function isPlatform(value: unknown): value is AnalyticsPlatform {
+export function isAnalyticsPlatform(value: unknown): value is AnalyticsPlatform {
   return value === "ios" || value === "android" || value === "web";
+}
+
+export function isAnalyticsEnvironment(value: unknown): value is AnalyticsEnvironment {
+  return value === "local";
 }
 
 function isMemberCount(value: unknown): value is number {
@@ -166,13 +224,20 @@ function isDuration(value: unknown): value is number {
   );
 }
 
+const FAILURE_CODES = [
+  "network_timeout",
+  "network_error",
+  "permission_denied",
+  "provider_error",
+  "unknown",
+] as const;
+const SAFE_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
 function isFailureCode(value: unknown): boolean {
   return (
-    value === "network_timeout" ||
-    value === "network_error" ||
-    value === "permission_denied" ||
-    value === "provider_error" ||
-    value === "unknown"
+    typeof value === "string" &&
+    SAFE_CODE_PATTERN.test(value) &&
+    (FAILURE_CODES as readonly string[]).includes(value)
   );
 }
 
@@ -181,22 +246,29 @@ function isSafePropertyValue(key: string, value: unknown): boolean {
     case "app_version":
       return isSafeAppVersion(value);
     case "platform":
-      return isPlatform(value);
+      return isAnalyticsPlatform(value);
     case "entry_source":
       return (
         value === "cold_start" ||
         value === "warm_resume" ||
         value === "room_create" ||
-        value === "room_join"
+        value === "room_join" ||
+        value === "warm" ||
+        value === "seed_demo"
       );
     case "auth_mode":
       return value === "guest" || value === "authenticated";
     case "room_role":
-      return value === "host" || value === "member";
+      return value === "host" || value === "member" || value === "guest";
     case "member_count":
       return isMemberCount(value);
     case "ready_state":
-      return value === "ready" || value === "not_ready" || value === "blocked";
+      return (
+        value === "ready" ||
+        value === "not_ready" ||
+        value === "blocked" ||
+        value === "pending"
+      );
     case "connection_state":
       return (
         value === "connecting" ||
@@ -213,7 +285,10 @@ function isSafePropertyValue(key: string, value: unknown): boolean {
       return (
         value === "host_action" ||
         value === "timeout" ||
-        value === "system_failure"
+        value === "system_failure" ||
+        value === "completed" ||
+        value === "user_left" ||
+        value === "error"
       );
     case "recording_state":
       return (
@@ -222,26 +297,48 @@ function isSafePropertyValue(key: string, value: unknown): boolean {
         value === "stopping" ||
         value === "ready" ||
         value === "failed" ||
-        value === "expired"
+        value === "expired" ||
+        value === "starting" ||
+        value === "paused" ||
+        value === "stopped"
       );
     case "score_job_state":
       return (
         value === "waiting" ||
         value === "processing" ||
         value === "success" ||
-        value === "failed"
+        value === "failed" ||
+        value === "pending" ||
+        value === "running" ||
+        value === "succeeded" ||
+        value === "not_started"
       );
     case "report_section":
       return (
         value === "overview" ||
         value === "pronunciation" ||
         value === "fluency" ||
-        value === "grammar"
+        value === "grammar" ||
+        value === "summary" ||
+        value === "details"
       );
     case "retry_reason":
-      return value === "user_action";
+      return (
+        value === "user_action" ||
+        value === "user_requested" ||
+        value === "failed" ||
+        value === "timeout" ||
+        value === "error"
+      );
     case "handoff_source":
-      return value === "admin_menu" || value === "deep_link";
+      return (
+        value === "admin_menu" ||
+        value === "deep_link" ||
+        value === "app" ||
+        value === "ops_button" ||
+        value === "room" ||
+        value === "report"
+      );
     default:
       return false;
   }

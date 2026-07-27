@@ -4,7 +4,10 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 
 import {
+  isAnalyticsEnvironment,
+  isAnalyticsPlatform,
   isAllowedAnalyticsProperties,
+  isSafeAppVersion,
   type AnalyticsEnvironment,
   type AnalyticsEvent,
   type AnalyticsEventName,
@@ -72,16 +75,52 @@ function getDefaultPlatform(): AnalyticsPlatform {
   return Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : "web";
 }
 
-export function createSafeUuidV4(): string {
-  const value = Crypto.randomUUID();
-  if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+function isUuidV4(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value,
     )
-  ) {
-    throw new Error("安全 UUID 工厂返回了无效 UUID");
+  );
+}
+
+function createValidatedUuidFactory(factory: () => string): () => string {
+  return () => {
+    try {
+      const candidate = factory();
+      if (isUuidV4(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Fall back to Expo Crypto below without exposing the original error.
+    }
+    return createSafeUuidV4();
+  };
+}
+
+export function createSafeUuidV4(): string {
+  const candidates = [
+    () => Crypto.randomUUID(),
+    () => {
+      const runtimeCrypto = globalThis.crypto as
+        | { randomUUID?: () => string }
+        | undefined;
+      return runtimeCrypto?.randomUUID?.();
+    },
+  ];
+
+  for (const candidateFactory of candidates) {
+    try {
+      const value = candidateFactory();
+      if (isUuidV4(value)) {
+        return value;
+      }
+    } catch {
+      // Try the next platform-provided secure UUID source.
+    }
   }
-  return value;
+
+  throw new Error("安全 UUID 工厂返回了无效 UUID");
 }
 
 function isAnonymousUserId(value: string | null): value is string {
@@ -94,6 +133,15 @@ function isAnonymousUserId(value: string | null): value is string {
 }
 
 function isRetryableError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "retryable" in error &&
+    typeof (error as { retryable?: unknown }).retryable === "boolean"
+  ) {
+    return (error as { retryable: boolean }).retryable;
+  }
+
   const status =
     typeof error === "object" && error !== null && "status" in error
       ? (error as { status?: unknown }).status
@@ -122,6 +170,8 @@ export class AnalyticsClient {
   private intervalHandle: unknown;
   private flushPromise: Promise<void> | null = null;
   private disposed = false;
+  private droppedCount = 0;
+  private rejectedCount = 0;
 
   constructor({
     transport,
@@ -137,12 +187,12 @@ export class AnalyticsClient {
     this.transport = transport;
     this.keyValueStore = keyValueStore;
     this.clock = clock;
-    this.uuidFactory = uuidFactory;
+    this.uuidFactory = createValidatedUuidFactory(uuidFactory);
     this.scheduler = scheduler;
     this.retryDelaysMs = retryDelaysMs;
-    this.appVersion = appVersion;
-    this.platform = platform;
-    this.environment = environment;
+    this.appVersion = isSafeAppVersion(appVersion) ? appVersion : "1.0.0";
+    this.platform = isAnalyticsPlatform(platform) ? platform : getDefaultPlatform();
+    this.environment = isAnalyticsEnvironment(environment) ? environment : "local";
     this.anonymousUserIdPromise = this.loadOrCreateAnonymousUserId();
     this.intervalHandle = this.scheduler.setInterval(() => {
       void this.flush("timer");
@@ -228,6 +278,13 @@ export class AnalyticsClient {
     return this.sessionId;
   }
 
+  getDiagnostics(): { droppedCount: number; rejectedCount: number } {
+    return {
+      droppedCount: this.droppedCount,
+      rejectedCount: this.rejectedCount,
+    };
+  }
+
   private currentAnonymousUserId: string | null = null;
 
   private async loadOrCreateAnonymousUserId(): Promise<string> {
@@ -279,14 +336,31 @@ export class AnalyticsClient {
   private async sendWithRetry(batch: readonly AnalyticsEvent[]): Promise<void> {
     for (let retryCount = 0; retryCount <= ANALYTICS_MAX_RETRY_COUNT; retryCount += 1) {
       try {
-        if (typeof this.transport === "function") {
-          await this.transport(batch);
-        } else {
-          await this.transport.sendAnalyticsEvents(batch);
+        const response =
+          typeof this.transport === "function"
+            ? await this.transport(batch)
+            : await this.transport.sendAnalyticsEvents(batch);
+
+        if (
+          !Number.isInteger(response.accepted) ||
+          !Number.isInteger(response.duplicates) ||
+          !Number.isInteger(response.rejected) ||
+          response.accepted < 0 ||
+          response.duplicates < 0 ||
+          response.rejected < 0 ||
+          response.accepted + response.duplicates + response.rejected !== batch.length
+        ) {
+          throw new Error("埋点响应计数不完整");
+        }
+
+        if (response.rejected > 0) {
+          this.droppedCount += response.rejected;
+          this.rejectedCount += response.rejected;
         }
         return;
       } catch (error) {
         if (retryCount >= ANALYTICS_MAX_RETRY_COUNT || !isRetryableError(error)) {
+          this.droppedCount += batch.length;
           return;
         }
 

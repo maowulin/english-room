@@ -20,6 +20,7 @@ type LoadHealth = () => Promise<HealthStatus>;
 type DemoScreenProps = {
   loadHealth?: LoadHealth;
   analyticsClient?: AnalyticsLifecycleClient;
+  disposeAnalyticsOnUnmount?: boolean;
 };
 
 function loadDefaultHealth(): Promise<HealthStatus> {
@@ -55,10 +56,13 @@ const apiStatusContent: Record<
 export function DemoScreen({
   loadHealth = loadDefaultHealth,
   analyticsClient = noopAnalyticsClient,
+  disposeAnalyticsOnUnmount = false,
 }: DemoScreenProps) {
   const [apiState, setApiState] = useState<ApiState>("checking");
 
-  useAnalyticsLifecycle(analyticsClient);
+  useAnalyticsLifecycle(analyticsClient, {
+    disposeOnUnmount: disposeAnalyticsOnUnmount,
+  });
 
   useEffect(() => {
     let isActive = true;

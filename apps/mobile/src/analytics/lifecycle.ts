@@ -22,6 +22,7 @@ export const noopAnalyticsClient: AnalyticsLifecycleClient = {
 
 export function useAnalyticsLifecycle(
   analyticsClient: AnalyticsLifecycleClient,
+  { disposeOnUnmount = false }: { disposeOnUnmount?: boolean } = {},
 ): void {
   useEffect(() => {
     let isActive = true;
@@ -35,12 +36,18 @@ export function useAnalyticsLifecycle(
         return;
       }
       analyticsClient.track("app_opened", { entry_source: entrySource });
-      void analyticsClient.flush("manual");
+      void analyticsClient.flush("manual").catch(() => undefined);
     };
 
     void openSession("cold_start");
 
     const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (
+        nextAppState !== previousAppState &&
+        (nextAppState === "background" || nextAppState === "inactive")
+      ) {
+        void analyticsClient.flush("background").catch(() => undefined);
+      }
       const resumedFromBackground =
         nextAppState === "active" && previousAppState !== "active";
       previousAppState = nextAppState;
@@ -51,8 +58,11 @@ export function useAnalyticsLifecycle(
 
     return () => {
       isActive = false;
+      void analyticsClient.flush("shutdown").catch(() => undefined);
       subscription.remove();
-      analyticsClient.dispose();
+      if (disposeOnUnmount) {
+        analyticsClient.dispose();
+      }
     };
-  }, [analyticsClient]);
+  }, [analyticsClient, disposeOnUnmount]);
 }

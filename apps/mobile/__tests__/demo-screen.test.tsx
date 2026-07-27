@@ -4,11 +4,19 @@ import { AppState, type AppStateStatus } from "react-native";
 import { DemoScreen } from "@/app/index";
 
 function createFakeAnalyticsClient() {
+  const calls: string[] = [];
   return {
-    startSession: jest.fn().mockResolvedValue(undefined),
+    calls,
+    startSession: jest.fn().mockImplementation(async () => {
+      calls.push("startSession");
+    }),
     track: jest.fn(),
-    flush: jest.fn().mockResolvedValue(undefined),
-    dispose: jest.fn(),
+    flush: jest.fn().mockImplementation(async (reason: string) => {
+      calls.push(`flush:${reason}`);
+    }),
+    dispose: jest.fn().mockImplementation(() => {
+      calls.push("dispose");
+    }),
   };
 }
 
@@ -60,7 +68,11 @@ describe("DemoScreen", () => {
     });
 
     const view = await render(
-      <DemoScreen loadHealth={loadHealth} analyticsClient={analyticsClient} />,
+      <DemoScreen
+        loadHealth={loadHealth}
+        analyticsClient={analyticsClient}
+        disposeAnalyticsOnUnmount
+      />,
     );
 
     await waitFor(() => {
@@ -71,6 +83,7 @@ describe("DemoScreen", () => {
     expect(appStateListener).toBeDefined();
 
     appStateListener?.("background");
+    expect(analyticsClient.flush).toHaveBeenCalledWith("background");
     appStateListener?.("active");
 
     await waitFor(() => {
@@ -82,8 +95,32 @@ describe("DemoScreen", () => {
 
     await view.unmount();
     expect(remove).toHaveBeenCalledTimes(1);
+    expect(analyticsClient.flush).toHaveBeenCalledWith("shutdown");
     expect(analyticsClient.dispose).toHaveBeenCalledTimes(1);
+    expect(analyticsClient.calls.indexOf("flush:shutdown")).toBeLessThan(
+      analyticsClient.calls.indexOf("dispose"),
+    );
     expect(addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
     addEventListener.mockRestore();
+  });
+
+  it("flushes on background and shutdown without disposing the shared client", async () => {
+    let appStateListener: ((state: AppStateStatus) => void) | undefined;
+    const remove = jest.fn();
+    jest.spyOn(AppState, "addEventListener").mockImplementation((_event, listener) => {
+      appStateListener = listener;
+      return { remove };
+    });
+    const analyticsClient = createFakeAnalyticsClient();
+    const view = await render(<DemoScreen analyticsClient={analyticsClient} />);
+
+    appStateListener?.("inactive");
+    await view.unmount();
+
+    expect(analyticsClient.flush).toHaveBeenCalledWith("background");
+    expect(analyticsClient.flush).toHaveBeenCalledWith("shutdown");
+    expect(analyticsClient.dispose).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledTimes(1);
+    jest.restoreAllMocks();
   });
 });
