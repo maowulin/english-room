@@ -45,6 +45,7 @@ export interface RtcClient {
   setConnectionState(state: Extract<RtcConnectionState, "connected" | "reconnecting" | "disconnected">): Promise<void>;
   subscribe(subscriptions: RtcSubscriptions): () => void;
   getState(): RtcState;
+  dispose(): void;
 }
 
 // Demo/Fake: Phase 1 control-plane only; no real TRTC/SOE media path.
@@ -89,6 +90,10 @@ export class FakeRtcClient implements RtcClient {
 
   getState(): RtcState {
     return this.state;
+  }
+
+  dispose(): void {
+    this.subscriptions = {};
   }
 
   private patch(partial: Partial<RtcState>) {

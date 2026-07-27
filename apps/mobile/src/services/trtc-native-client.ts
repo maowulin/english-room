@@ -35,6 +35,8 @@ export type TrtcNativeClientOptions = {
   audioRouteSpeaker: number;
   audioRouteEarpiece: number;
   volumeIntervalMs?: number;
+  /** Max wait for onExitRoom before leave resolves fail-open (ms). */
+  leaveAckTimeoutMs?: number;
 };
 
 function isGrant(input: RtcGrantCredentials | { roomId: string; userId: string }): input is RtcGrantCredentials {
@@ -59,11 +61,14 @@ export class TrtcNativeClient implements RtcClient {
   private readonly audioRouteSpeaker: number;
   private readonly audioRouteEarpiece: number;
   private readonly volumeIntervalMs: number;
+  private readonly leaveAckTimeoutMs: number;
   private readonly listener: TrtcListener;
   private subscriptions: RtcSubscriptions = {};
   private enterResolve: (() => void) | undefined;
   private enterReject: ((error: Error) => void) | undefined;
   private exitResolve: (() => void) | undefined;
+  private leavePromise: Promise<void> | undefined;
+  private disposed = false;
   private state: RtcState = {
     joined: false,
     muted: false,
@@ -78,42 +83,99 @@ export class TrtcNativeClient implements RtcClient {
     this.audioRouteSpeaker = options.audioRouteSpeaker;
     this.audioRouteEarpiece = options.audioRouteEarpiece;
     this.volumeIntervalMs = options.volumeIntervalMs ?? 300;
+    this.leaveAckTimeoutMs = options.leaveAckTimeoutMs ?? 3000;
     this.listener = (type, params) => this.handleListener(type, params);
     this.cloud.registerListener(this.listener);
   }
 
   async join(input: RtcGrantCredentials | { roomId: string; userId: string }): Promise<void> {
+    if (this.disposed) {
+      throw new Error("TRTC client disposed");
+    }
     if (!isGrant(input)) {
       throw new Error("真实语音入房需要 Backend RTC grant（含 str_room_id / user_sig）");
     }
+    if (this.leavePromise) {
+      throw new Error("正在退房，完成 onExitRoom 前不可重新入房");
+    }
+    if (this.state.joined) {
+      throw new Error("已在房间内，请先 leave 再 join");
+    }
+    if (this.state.connection === "joining" || this.enterResolve || this.enterReject) {
+      throw new Error("入房进行中，禁止重复 join");
+    }
+
     this.patch({ connection: "joining", joined: false });
     const entered = new Promise<void>((resolve, reject) => {
       this.enterResolve = resolve;
       this.enterReject = reject;
     });
-    await this.cloud.enterRoom(
-      {
-        sdkAppId: input.sdkAppId,
-        userId: input.trtcUserId,
-        userSig: input.userSig,
-        roomId: 0,
-        strRoomId: input.strRoomId,
-      },
-      this.sceneAudioCall,
-    );
+    try {
+      await this.cloud.enterRoom(
+        {
+          sdkAppId: input.sdkAppId,
+          userId: input.trtcUserId,
+          userSig: input.userSig,
+          roomId: 0,
+          strRoomId: input.strRoomId,
+        },
+        this.sceneAudioCall,
+      );
+    } catch (error) {
+      this.clearEnterWaiters();
+      this.patch({ connection: "joinFailed", joined: false });
+      throw error instanceof Error ? error : new Error(String(error));
+    }
     await entered;
-    await this.cloud.startLocalAudio(this.audioQualitySpeech);
-    await this.cloud.setAudioRoute(this.audioRouteSpeaker);
-    await this.cloud.enableAudioVolumeEvaluation(this.volumeIntervalMs);
-    this.patch({ joined: true, connection: "connected", speakerOn: true, muted: false });
+    try {
+      await this.cloud.startLocalAudio(this.audioQualitySpeech);
+      await this.cloud.setAudioRoute(this.audioRouteSpeaker);
+      await this.cloud.enableAudioVolumeEvaluation(this.volumeIntervalMs);
+      this.patch({ joined: true, connection: "connected", speakerOn: true, muted: false });
+    } catch (error) {
+      this.patch({ connection: "joinFailed", joined: false });
+      try {
+        await this.cloud.exitRoom();
+      } catch {
+        // Best-effort TRTC cleanup after partial join setup failure.
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    }
   }
 
   async leave(): Promise<void> {
-    const waiting = new Promise<void>((resolve) => {
-      this.exitResolve = resolve;
-    });
-    await this.cloud.exitRoom();
-    await waiting;
+    if (this.leavePromise) {
+      return this.leavePromise;
+    }
+    if (!this.state.joined && this.state.connection !== "joining") {
+      if (this.state.connection !== "kicked") {
+        this.patch({ joined: false, connection: "disconnected" });
+      }
+      return;
+    }
+
+    this.leavePromise = (async () => {
+      const waiting = new Promise<void>((resolve) => {
+        this.exitResolve = resolve;
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, this.leaveAckTimeoutMs);
+      });
+      try {
+        await this.cloud.exitRoom();
+        await Promise.race([waiting, timedOut]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (this.state.joined || this.state.connection === "joining") {
+          this.patch({ joined: false, connection: "disconnected" });
+        }
+        this.exitResolve = undefined;
+        this.leavePromise = undefined;
+      }
+    })();
+
+    return this.leavePromise;
   }
 
   async setMuted(muted: boolean): Promise<void> {
@@ -143,22 +205,45 @@ export class TrtcNativeClient implements RtcClient {
   }
 
   dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.clearEnterWaiters(new Error("TRTC client disposed"));
+    this.exitResolve = undefined;
+    this.leavePromise = undefined;
+    if (this.state.joined) {
+      void this.cloud.exitRoom().catch(() => {
+        // Best-effort TRTC cleanup on dispose; do not wait for onExitRoom.
+      });
+    }
+    this.patch({ joined: false, connection: "disconnected" });
+    this.subscriptions = {};
     this.cloud.unRegisterListener(this.listener);
   }
 
+  private clearEnterWaiters(rejectReason?: Error) {
+    if (rejectReason) {
+      this.enterReject?.(rejectReason);
+    }
+    this.enterResolve = undefined;
+    this.enterReject = undefined;
+  }
+
   private handleListener(type: string, params: Record<string, unknown>) {
+    if (this.disposed) {
+      return;
+    }
     switch (type) {
       case "onEnterRoom": {
         const result = Number(params.result ?? 0);
         if (result > 0) {
           this.enterResolve?.();
-          this.enterResolve = undefined;
-          this.enterReject = undefined;
+          this.clearEnterWaiters();
         } else {
           this.patch({ connection: "joinFailed", joined: false });
           this.enterReject?.(new Error(`TRTC enterRoom failed: ${result}`));
-          this.enterResolve = undefined;
-          this.enterReject = undefined;
+          this.clearEnterWaiters();
         }
         return;
       }
@@ -171,8 +256,11 @@ export class TrtcNativeClient implements RtcClient {
         return;
       }
       case "onTryToReconnect":
-      case "onConnectionLost":
         this.patch({ connection: "reconnecting" });
+        return;
+      case "onConnectionLost":
+        // Lost is disconnect truth; only onTryToReconnect means actively reconnecting.
+        this.patch({ connection: "disconnected" });
         return;
       case "onConnectionRecovery":
         this.patch({ connection: "connected" });

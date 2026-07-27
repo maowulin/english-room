@@ -3,6 +3,12 @@ export type Player = {
   nickname: string;
 };
 
+export type RoomMemberView = {
+  playerId: string;
+  nickname: string;
+  ready: boolean;
+};
+
 export type RoomSummary = {
   id: string;
   code: string;
@@ -15,13 +21,15 @@ export type SessionState = {
   player?: Player;
   ready: boolean;
   room?: RoomSummary;
+  members: RoomMemberView[];
   screen: Screen;
 };
 
 export type SessionAction =
   | { type: "authenticated"; player: Player }
-  | { type: "roomJoined"; room: RoomSummary }
-  | { type: "readyChanged"; ready: boolean }
+  | { type: "roomJoined"; room: RoomSummary; members?: RoomMemberView[] }
+  | { type: "readyChanged"; ready: boolean; members?: RoomMemberView[] }
+  | { type: "roomMembersUpdated"; members: RoomMemberView[] }
   | { type: "roomStarted" }
   | { type: "roomEnded" }
   | { type: "showRegister" }
@@ -30,6 +38,7 @@ export type SessionAction =
 
 export const initialSessionState: SessionState = {
   ready: false,
+  members: [],
   screen: "login",
 };
 
@@ -41,9 +50,17 @@ export function sessionReducer(
     case "authenticated":
       return { ...state, player: action.player, screen: "lobby" };
     case "roomJoined":
-      return { ...state, ready: false, room: action.room, screen: "waiting" };
+      return { ...state, ready: false, room: action.room, members: action.members ?? [], screen: "waiting" };
     case "readyChanged":
-      return { ...state, ready: action.ready };
+      return {
+        ...state,
+        ready: action.ready,
+        members: action.members ?? (state.members ?? []).map((member) =>
+          member.playerId === state.player?.id ? { ...member, ready: action.ready } : member,
+        ),
+      };
+    case "roomMembersUpdated":
+      return { ...state, members: action.members };
     case "roomStarted":
       return { ...state, screen: "live" };
     case "roomEnded":
@@ -53,6 +70,6 @@ export function sessionReducer(
     case "showLogin":
       return { ...state, screen: "login" };
     case "leaveRoom":
-      return { ...state, ready: false, room: undefined, screen: "lobby" };
+      return { ...state, ready: false, room: undefined, members: [], screen: "lobby" };
   }
 }

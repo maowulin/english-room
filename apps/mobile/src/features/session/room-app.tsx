@@ -11,18 +11,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { sessionReducer, initialSessionState, type Screen, type RoomSummary } from "./session-reducer";
+import { sessionReducer, initialSessionState, type Screen, type RoomSummary, type RoomMemberView } from "./session-reducer";
 import { AuthScreen as VisualAuthScreen } from "./auth-screen";
 import {
   demoMediaUiState,
   LiveScreen,
   LobbyScreen,
+  type LiveRemoteSeat,
   type MediaUiState,
   ReportScreen,
   WaitingScreen,
 } from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
-import { HttpRoomClient, type RoomClient, type ReportItem } from "@/services/room-client";
+import { HttpRoomClient, type RoomClient, type ReportItem, type RoomMember } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
 import { createRtcClient } from "@/services/rtc-factory";
 import { resolveMediaMode, type RtcClient } from "@/services/rtc-client";
@@ -35,6 +36,38 @@ function mapRtcToMedia(rtc: string): MediaUiState["rtc"] {
   if (rtc === "joinFailed") return "joinFailed";
   if (rtc === "disconnected") return "disconnected";
   return "idle";
+}
+
+function mapRoomMembers(members: RoomMember[], player?: { id: string; nickname: string }): RoomMemberView[] {
+  return members.map((member) => ({
+    playerId: member.playerId,
+    nickname: member.playerId === player?.id ? player.nickname : member.playerId,
+    ready: member.ready,
+  }));
+}
+
+function rtcTerminalFailure(rtc: MediaUiState["rtc"]) {
+  return rtc === "disconnected" || rtc === "kicked" || rtc === "joinFailed";
+}
+
+function initialRealMedia(): MediaUiState {
+  return {
+    mode: "real",
+    network: "good",
+    permission: "unknown",
+    grant: "idle",
+    rtc: "idle",
+    recording: "idle",
+    report: "waiting",
+  };
+}
+
+function scoreJobsTerminal(items: ReportItem[]): boolean {
+  return items.length > 0 && items.every((item) => item.status === "completed" || item.status === "failed");
+}
+
+function scoreJobsReady(items: ReportItem[]): boolean {
+  return items.length > 0 && items.every((item) => item.status === "completed");
 }
 
 const seats = [
@@ -155,61 +188,114 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
   const mediaMode = resolveMediaMode(process.env, Platform.OS);
   const rtcRef = useRef<RtcClient | null>(null);
   const [liveMedia, setLiveMedia] = useState<MediaUiState>(
-    injectedMediaState ??
-      (mediaMode === "real"
-        ? {
-            mode: "real",
-            network: "good",
-            permission: "unknown",
-            grant: "idle",
-            rtc: "idle",
-            recording: "idle",
-            report: "waiting",
-          }
-        : demoMediaUiState),
+    injectedMediaState ?? (mediaMode === "real" ? initialRealMedia() : demoMediaUiState),
   );
   const mediaState = injectedMediaState ?? liveMedia;
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
+  const [remoteSeats, setRemoteSeats] = useState<LiveRemoteSeat[]>([]);
   const [apiError, setApiError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [reportItems, setReportItems] = useState<ReportItem[]>([]);
   const [reportError, setReportError] = useState<string>();
+  const playerRef = useRef(state.player);
+  useEffect(() => {
+    playerRef.current = state.player;
+  }, [state.player]);
   useEffect(() => {
     if (injectedMediaState || mediaMode !== "real") return;
-    let cancelled = false;
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    // Defer client creation so fail-closed setState is not synchronous in the effect body.
     queueMicrotask(() => {
-      if (cancelled) return;
+      if (!active) return;
       try {
         const rtc = createRtcClient("real");
+        if (!active) {
+          rtc.dispose();
+          return;
+        }
         rtcRef.current = rtc;
-        rtc.subscribe({
+        unsubscribe = rtc.subscribe({
           onState: (next) => {
+            const rtc = mapRtcToMedia(next.connection);
             setMuted(next.muted);
             setSpeakerOn(next.speakerOn);
-            setLiveMedia((current) => ({ ...current, rtc: mapRtcToMedia(next.connection) }));
+            setLiveMedia((current) => ({ ...current, rtc }));
+            if (rtcTerminalFailure(rtc)) {
+              setRemoteSeats([]);
+            }
           },
           onNetwork: (quality) => setLiveMedia((current) => ({ ...current, network: quality })),
+          onRemoteUserEnter: (userId) => {
+            setRemoteSeats((current) =>
+              current.some((seat) => seat.userId === userId)
+                ? current
+                : [...current, { userId, speaking: false, audioAvailable: true }],
+            );
+          },
+          onRemoteUserLeave: (userId) => {
+            setRemoteSeats((current) => current.filter((seat) => seat.userId !== userId));
+          },
+          onUserAudioAvailable: (userId, available) => {
+            setRemoteSeats((current) =>
+              current.map((seat) => (seat.userId === userId ? { ...seat, audioAvailable: available } : seat)),
+            );
+          },
+          onUserVoiceVolume: (userId, volume) => {
+            setRemoteSeats((current) =>
+              current.map((seat) => (seat.userId === userId ? { ...seat, speaking: volume > 10 } : seat)),
+            );
+          },
         });
       } catch {
+        if (!active) return;
         // Fail closed into media UI state; do not surface a status-bar "API:" line.
         setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "joinFailed" }));
       }
     });
     return () => {
-      cancelled = true;
+      active = false;
+      unsubscribe?.();
+      const rtc = rtcRef.current;
+      rtcRef.current = null;
+      if (rtc) {
+        void rtc
+          .leave()
+          .catch(() => undefined)
+          .finally(() => rtc.dispose());
+      }
     };
   }, [injectedMediaState, mediaMode]);
   const ensureMicPermission = async () => {
-    if (Platform.OS !== "android") {
-      setLiveMedia((current) => ({ ...current, permission: "granted" }));
-      return true;
+    if (Platform.OS === "android") {
+      setLiveMedia((current) => ({ ...current, permission: "requesting" }));
+      const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+      setLiveMedia((current) => ({ ...current, permission: granted ? "granted" : "denied" }));
+      return granted;
     }
+    if (Platform.OS === "web") {
+      setLiveMedia((current) => ({ ...current, permission: "requesting" }));
+      try {
+        const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+        if (!media?.getUserMedia) {
+          // Cannot claim granted without a query surface.
+          setLiveMedia((current) => ({ ...current, permission: "unknown" }));
+          return false;
+        }
+        const stream = await media.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        setLiveMedia((current) => ({ ...current, permission: "granted" }));
+        return true;
+      } catch {
+        setLiveMedia((current) => ({ ...current, permission: "denied" }));
+        return false;
+      }
+    }
+    // iOS/native: never mark granted before a real system prompt / join evidence.
     setLiveMedia((current) => ({ ...current, permission: "requesting" }));
-    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-    const granted = result === PermissionsAndroid.RESULTS.GRANTED;
-    setLiveMedia((current) => ({ ...current, permission: granted ? "granted" : "denied" }));
-    return granted;
+    return true;
   };
   const prepareRealMedia = async (roomId: string) => {
     // Media failures must surface inside waiting/live via MediaUiState, never block
@@ -232,6 +318,12 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
       setLiveMedia((current) => ({ ...current, grant: "ready" }));
       try {
         await rtc.join(grant);
+        setLiveMedia((current) => ({
+          ...current,
+          permission: current.permission === "denied" ? "denied" : "granted",
+          grant: "ready",
+          rtc: "joined",
+        }));
       } catch {
         setLiveMedia((current) => ({ ...current, rtc: "joinFailed" }));
       }
@@ -239,9 +331,39 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
       setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "idle" }));
     }
   };
+  const leaveSession = () => {
+    const rtc = rtcRef.current;
+    dispatch({ type: "leaveRoom" });
+    setRemoteSeats([]);
+    if (!injectedMediaState) {
+      setLiveMedia(mediaMode === "real" ? initialRealMedia() : demoMediaUiState);
+    }
+    // Media teardown must not block returning to lobby; join is gated inside TrtcNativeClient until leave settles.
+    if (mediaMode === "real" && rtc) {
+      void rtc.leave().catch(() => undefined);
+    }
+  };
   const enterRoomFlow = async (room: RoomSummary & { id: string }) => {
-    dispatch({ type: "roomJoined", room: { id: room.id, code: room.code, title: room.title } });
+    const player = playerRef.current;
+    let joinedMembers: RoomMember[] = [];
+    if (player?.id) {
+      const joined = await client.joinRoom(room.id, { playerId: player.id });
+      joinedMembers = joined.members;
+    } else {
+      const snapshot = await client.getRoom(room.id);
+      joinedMembers = snapshot.members;
+    }
+    dispatch({
+      type: "roomJoined",
+      room: { id: room.id, code: room.code, title: room.title },
+      members: mapRoomMembers(joinedMembers, player),
+    });
     await prepareRealMedia(room.id);
+  };
+  const reconnectMedia = async () => {
+    if (!roomId || busy || mediaMode !== "real" || injectedMediaState) return;
+    setRemoteSeats([]);
+    await prepareRealMedia(roomId);
   };
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -294,7 +416,13 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     const nextReady = !state.ready;
     void client
       .setReady(roomId, nextReady)
-      .then(() => dispatch({ type: "readyChanged", ready: nextReady }))
+      .then((room) =>
+        dispatch({
+          type: "readyChanged",
+          ready: nextReady,
+          members: mapRoomMembers(room.members, playerRef.current),
+        }),
+      )
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -315,8 +443,9 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     setBusy(true);
     void (async () => {
       try {
+        // Backend end is the control-plane source of truth; media leave must not block it.
         if (mediaMode === "real" && rtcRef.current) {
-          await rtcRef.current.leave();
+          void rtcRef.current.leave().catch(() => undefined);
         }
         const ended = await client.endRoom(roomId);
         if (ended.status === "recording_failed") {
@@ -326,8 +455,14 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
         }
         const report = await client.getRoomReport(roomId);
         setReportItems(report.items);
-        if (ended.status !== "recording_failed") {
+        if (ended.status === "recording_failed") {
+          // already failed above
+        } else if (scoreJobsReady(report.items)) {
           setLiveMedia((current) => ({ ...current, recording: "ready", report: "ready" }));
+        } else if (scoreJobsTerminal(report.items)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+        } else {
+          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
         }
         dispatch({ type: "roomEnded" });
       } catch (error) {
@@ -345,12 +480,25 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     login: <VisualAuthScreen busy={busy} mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
     register: <VisualAuthScreen busy={busy} mode="register" onLogin={auth} onToggle={() => dispatch({ type: "showLogin" })} />,
     lobby: <LobbyScreen busy={busy} mediaState={mediaState} onCreate={create} onJoin={joinByCode} />,
-    waiting: <WaitingScreen busy={busy} mediaState={mediaState} ready={state.ready} roomCode={state.room?.code} onLeave={() => dispatch({ type: "leaveRoom" })} onReady={ready} onStart={start} />,
+    waiting: (
+      <WaitingScreen
+        busy={busy}
+        mediaState={mediaState}
+        members={state.members}
+        ready={state.ready}
+        roomCode={state.room?.code}
+        onLeave={leaveSession}
+        onReady={ready}
+        onStart={start}
+      />
+    ),
     live: (
       <LiveScreen
         busy={busy}
+        localName={state.player?.nickname ?? "我"}
         mediaState={mediaState}
         muted={muted}
+        remotes={remoteSeats}
         speakerOn={speakerOn}
         onToggleMute={() => {
           void rtcRef.current?.setMuted(!muted);
@@ -358,10 +506,13 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
         onToggleSpeaker={() => {
           void rtcRef.current?.setSpeaker(!speakerOn);
         }}
+        onReconnectMedia={() => {
+          void reconnectMedia();
+        }}
         onEnd={end}
       />
     ),
-    report: <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={() => dispatch({ type: "leaveRoom" })} onRetry={retry} />,
+    report: <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={leaveSession} onRetry={retry} />,
   };
   return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{pages[state.screen]}</>;
 }

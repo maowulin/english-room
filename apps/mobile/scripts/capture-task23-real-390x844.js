@@ -1,4 +1,5 @@
 // Capture 390×844 real media UI states via Expo web + /qa-media harness.
+// Evidence class: Web 注入态视觉布局 only — not native/real TRTC runtime.
 const { chromium } = require("playwright-core");
 const fs = require("fs");
 const os = require("os");
@@ -6,10 +7,41 @@ const path = require("path");
 
 const APP = process.env.APP_URL || "http://localhost:8081";
 const OUT = path.resolve(__dirname, "..", ".qa-screenshots", "task23-real-390x844");
-const EXEC = path.join(
-  os.homedir(),
-  "Library/Caches/ms-playwright/chromium-1194/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-);
+
+function resolveChromiumExecutable() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  }
+  try {
+    if (typeof chromium.executablePath === "function") {
+      const resolved = chromium.executablePath();
+      if (resolved && fs.existsSync(resolved)) return resolved;
+    }
+  } catch {
+    // fall through to cache scan
+  }
+  const cacheRoot = path.join(os.homedir(), "Library/Caches/ms-playwright");
+  if (!fs.existsSync(cacheRoot)) {
+    throw new Error(
+      "Chromium executable not found. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH or install Playwright browsers.",
+    );
+  }
+  const candidates = fs
+    .readdirSync(cacheRoot)
+    .filter((name) => name.startsWith("chromium-"))
+    .sort()
+    .reverse()
+    .map((name) =>
+      path.join(cacheRoot, name, "chrome-mac/Chromium.app/Contents/MacOS/Chromium"),
+    );
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    throw new Error(
+      "Chromium executable not found under ~/Library/Caches/ms-playwright. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.",
+    );
+  }
+  return found;
+}
 
 const shots = [
   ["lobby", "real-lobby", "01-lobby-real.png", "ROOM LIVE"],
@@ -31,7 +63,8 @@ const shots = [
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await chromium.launch({ executablePath: EXEC, headless: true });
+  const executablePath = resolveChromiumExecutable();
+  const browser = await chromium.launch({ executablePath, headless: true });
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -61,6 +94,7 @@ const shots = [
   }
   await browser.close();
   console.log("OUT", OUT);
+  console.log("NOTE web-injected-layout-only not-native-trtc");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

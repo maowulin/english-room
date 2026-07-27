@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
+import { StyleSheet, View } from "react-native";
 
 import { RoomApp } from "@/app/index";
 import { LiveScreen, ReportScreen, type MediaUiState } from "@/features/session/story-screens";
@@ -319,6 +320,32 @@ describe("RoomApp", () => {
     expect(view.getByText("正在连接语音房间")).toBeTruthy();
   });
 
+  it("real live does not invent fake remote speaking/network seats", async () => {
+    const view = await renderRealLive();
+
+    expect(view.queryByText("Mia")).toBeNull();
+    expect(view.queryByText("Alex")).toBeNull();
+    expect(view.queryByText("苏晴")).toBeNull();
+    expect(view.getByText("远端")).toBeTruthy();
+    expect(view.getByText("等待加入")).toBeTruthy();
+    expect(view.getByText("本机 良好")).toBeTruthy();
+    expect(view.queryByText("Mia 良好")).toBeNull();
+  });
+
+  it("real live renders subscribed remotes without demo cast", async () => {
+    const view = await render(
+      <LiveScreen
+        mediaState={realMediaState}
+        remotes={[{ userId: "u_remote_1", speaking: true, audioAvailable: true }]}
+        onEnd={() => undefined}
+      />,
+    );
+
+    expect(view.getByText("u_remote_1")).toBeTruthy();
+    expect(view.getByText("正在发言")).toBeTruthy();
+    expect(view.queryByText("Mia")).toBeNull();
+  });
+
   it.each([
     { grant: "loading", rtc: "joining" },
     { grant: "failed" },
@@ -356,5 +383,103 @@ describe("RoomApp", () => {
     expect(view.getByText("录音上传失败")).toBeTruthy();
     expect(view.getByText("等待全员评分完成")).toBeTruthy();
     expect(view.queryByText("表现优秀")).toBeNull();
+  });
+
+  it("real waiting lists RoomClient members instead of demo cast and player counts", async () => {
+    const view = await renderReal();
+
+    await act(async () => {
+      fireEvent.changeText(view.getByTestId("nickname-input"), "RealGuest");
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+    await act(async () => {
+      fireEvent.press(await view.findByTestId("create-room-button"));
+    });
+
+    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+    expect(view.getByText("RealGuest")).toBeTruthy();
+    expect(view.getByText("guest-1")).toBeTruthy();
+    expect(view.queryByText("林舟")).toBeNull();
+    expect(view.queryByText("Mia")).toBeNull();
+    expect(view.queryByText("玩家 4 / 6")).toBeNull();
+    expect(view.queryByText("MINT")).toBeNull();
+  });
+
+  it("real lobby hides demo player roster on the port card", async () => {
+    const view = await renderReal();
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+
+    expect(await view.findByText("ROOM LIVE")).toBeTruthy();
+    expect(view.queryByText("4 / 6 位玩家")).toBeNull();
+    expect(view.queryByText("+2")).toBeNull();
+  });
+
+  it("real report score card layout shrinks within a 390px viewport", async () => {
+    const view = await render(
+      <View style={{ width: 390 }}>
+        <ReportScreen
+          items={completedReports}
+          mediaState={realMediaState}
+          onDone={() => undefined}
+          onRetry={() => undefined}
+        />
+      </View>,
+    );
+
+    const scoreCard = view.getByTestId("report-score-card");
+    const flat = StyleSheet.flatten(scoreCard.props.style);
+    expect(flat?.flexShrink).toBe(1);
+    expect(flat?.minWidth).toBe(0);
+    expect(flat?.overflow).toBe("hidden");
+  });
+
+  it.each([
+    { rtc: "disconnected" as const, label: "重新连接" },
+    { rtc: "joinFailed" as const, label: "重新入房" },
+    { rtc: "kicked" as const, label: "重新入房" },
+  ])("real live exposes a reconnect action when rtc is $rtc", async ({ rtc, label }) => {
+    const onReconnect = jest.fn();
+    const view = await render(
+      <LiveScreen
+        mediaState={{ ...realMediaState, rtc }}
+        onEnd={() => undefined}
+        onReconnectMedia={onReconnect}
+      />,
+    );
+
+    const button = view.getByLabelText(label);
+    expect(button).toBeEnabled();
+    fireEvent.press(button);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("real live hides stale remote seats after parent clears remotes on rtc failure", async () => {
+    const view = await render(
+      <LiveScreen
+        mediaState={realMediaState}
+        remotes={[{ userId: "stale-remote", speaking: true, audioAvailable: true }]}
+        onEnd={() => undefined}
+      />,
+    );
+    expect(view.getByText("stale-remote")).toBeTruthy();
+
+    view.rerender(
+      <LiveScreen
+        mediaState={{ ...realMediaState, rtc: "disconnected" }}
+        remotes={[]}
+        onEnd={() => undefined}
+        onReconnectMedia={() => undefined}
+      />,
+    );
+
+    await act(async () => undefined);
+
+    expect(view.queryByText("stale-remote")).toBeNull();
+    expect(view.getByLabelText("重新连接")).toBeTruthy();
   });
 });

@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import { View } from "react-native";
 
 import {
@@ -11,9 +11,15 @@ import {
 import type { ReportItem } from "@/services/room-client";
 
 /**
- * Dev/QA visual harness for 390×844 media-state screenshots.
- * Not part of the player product path. Enable via /qa-media?screen=&preset=
+ * Dev/QA visual harness for 390×844 media-state screenshots (Web 注入态布局证据).
+ * Fail-closed: only available in __DEV__ or when EXPO_PUBLIC_ENABLE_QA_MEDIA=1.
+ * Not part of the player product path; not native/real TRTC runtime evidence.
  */
+function isQaMediaEnabled(): boolean {
+  if (process.env.EXPO_PUBLIC_ENABLE_QA_MEDIA === "1") return true;
+  return typeof __DEV__ !== "undefined" && __DEV__;
+}
+
 const presets: Record<string, MediaUiState> = {
   "real-lobby": {
     mode: "real",
@@ -162,6 +168,10 @@ export default function QaMediaScreen() {
   const preset = String(params.preset ?? "real-lobby");
   const mediaState = presets[preset] ?? presets["real-lobby"];
   const noop = () => undefined;
+
+  if (!isQaMediaEnabled()) {
+    return <Redirect href="/" />;
+  }
 
   if (screen === "waiting") {
     return (
