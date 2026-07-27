@@ -3,6 +3,12 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DemoStatusCard } from "@/components/demo-status-card";
+import {
+  getDefaultAnalyticsClient,
+  noopAnalyticsClient,
+  useAnalyticsLifecycle,
+  type AnalyticsLifecycleClient,
+} from "@/analytics";
 import { ApiClient, type HealthStatus } from "@/services/api-client";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
 
@@ -13,6 +19,7 @@ type LoadHealth = () => Promise<HealthStatus>;
 
 type DemoScreenProps = {
   loadHealth?: LoadHealth;
+  analyticsClient?: AnalyticsLifecycleClient;
 };
 
 function loadDefaultHealth(): Promise<HealthStatus> {
@@ -47,8 +54,11 @@ const apiStatusContent: Record<
 
 export function DemoScreen({
   loadHealth = loadDefaultHealth,
+  analyticsClient = noopAnalyticsClient,
 }: DemoScreenProps) {
   const [apiState, setApiState] = useState<ApiState>("checking");
+
+  useAnalyticsLifecycle(analyticsClient);
 
   useEffect(() => {
     let isActive = true;
@@ -122,7 +132,7 @@ export function DemoScreen({
 }
 
 export default function HomeScreen() {
-  return <DemoScreen />;
+  return <DemoScreen analyticsClient={getDefaultAnalyticsClient()} />;
 }
 
 const styles = StyleSheet.create({

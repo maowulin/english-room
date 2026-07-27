@@ -1,6 +1,16 @@
-import { render } from "@testing-library/react-native";
+import { render, waitFor } from "@testing-library/react-native";
+import { AppState, type AppStateStatus } from "react-native";
 
 import { DemoScreen } from "@/app/index";
+
+function createFakeAnalyticsClient() {
+  return {
+    startSession: jest.fn().mockResolvedValue(undefined),
+    track: jest.fn(),
+    flush: jest.fn().mockResolvedValue(undefined),
+    dispose: jest.fn(),
+  };
+}
 
 describe("DemoScreen", () => {
   it("shows the foundation services and online API status", async () => {
@@ -8,8 +18,11 @@ describe("DemoScreen", () => {
       service: "english-room-api",
       status: "ok",
     });
+    const analyticsClient = createFakeAnalyticsClient();
 
-    const view = await render(<DemoScreen loadHealth={loadHealth} />);
+    const view = await render(
+      <DemoScreen loadHealth={loadHealth} analyticsClient={analyticsClient} />,
+    );
 
     view.getByText("English Room Demo");
     view.getByText("Expo Development Build");
@@ -21,10 +34,56 @@ describe("DemoScreen", () => {
 
   it("keeps the Demo usable when the API is offline", async () => {
     const loadHealth = jest.fn().mockRejectedValue(new Error("offline"));
+    const analyticsClient = createFakeAnalyticsClient();
 
-    const view = await render(<DemoScreen loadHealth={loadHealth} />);
+    const view = await render(
+      <DemoScreen loadHealth={loadHealth} analyticsClient={analyticsClient} />,
+    );
 
     await view.findByText("服务离线");
     view.getByText("客户端仍可运行，请启动 FastAPI 后重试。");
+  });
+
+  it("tracks a cold start and a new session when returning from background", async () => {
+    let appStateListener: ((state: AppStateStatus) => void) | undefined;
+    const remove = jest.fn();
+    const addEventListener = jest
+      .spyOn(AppState, "addEventListener")
+      .mockImplementation((_event, listener) => {
+        appStateListener = listener;
+        return { remove };
+      });
+    const analyticsClient = createFakeAnalyticsClient();
+    const loadHealth = jest.fn().mockResolvedValue({
+      service: "english-room-api",
+      status: "ok",
+    });
+
+    const view = await render(
+      <DemoScreen loadHealth={loadHealth} analyticsClient={analyticsClient} />,
+    );
+
+    await waitFor(() => {
+      expect(analyticsClient.track).toHaveBeenCalledWith("app_opened", {
+        entry_source: "cold_start",
+      });
+    });
+    expect(appStateListener).toBeDefined();
+
+    appStateListener?.("background");
+    appStateListener?.("active");
+
+    await waitFor(() => {
+      expect(analyticsClient.startSession).toHaveBeenCalledTimes(2);
+      expect(analyticsClient.track).toHaveBeenLastCalledWith("app_opened", {
+        entry_source: "warm_resume",
+      });
+    });
+
+    await view.unmount();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(analyticsClient.dispose).toHaveBeenCalledTimes(1);
+    expect(addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+    addEventListener.mockRestore();
   });
 });
