@@ -9,7 +9,10 @@ import {
   type AnalyticsPlatform,
 } from "@/services/analytics-client";
 import { AnalyticsEvents } from "@/services/analytics-events";
-import { createHttpAnalyticsTransport } from "@/services/analytics-http-transport";
+import {
+  createBufferedHttpAnalyticsTransport,
+  type AnalyticsFlushReason,
+} from "@/services/analytics-batcher";
 import { HttpRoomClient, type RoomClient } from "@/services/room-client";
 
 let persistedUserId: string | undefined;
@@ -79,22 +82,31 @@ function resolveHttpAnalyticsUserId(
   return () => playerId?.trim() || client.getPlayerId()?.trim() || undefined;
 }
 
+export type HttpAnalyticsEvents = AnalyticsEvents & {
+  flushAnalytics: (reason?: AnalyticsFlushReason) => Promise<void>;
+  destroyAnalytics: () => void;
+};
+
 export function createHttpAnalyticsEvents(
   client: HttpRoomClient,
   appSessionId: string,
   playerId?: string,
-): AnalyticsEvents {
+): HttpAnalyticsEvents {
   const resolveUserId = resolveHttpAnalyticsUserId(client, playerId);
-  return new AnalyticsEvents(
+  const buffered = createBufferedHttpAnalyticsTransport({
+    baseUrl: resolveApiBaseUrl(),
+    getAccessToken: () => client.getAccessToken(),
+  });
+  const events = new AnalyticsEvents(
     new AnalyticsClient({
       context: createAnalyticsContext(appSessionId, playerId ?? ""),
       resolveUserId,
-      transport: createHttpAnalyticsTransport({
-        baseUrl: resolveApiBaseUrl(),
-        getAccessToken: () => client.getAccessToken(),
-      }),
+      transport: buffered.transport,
     }),
-  );
+  ) as HttpAnalyticsEvents;
+  events.flushAnalytics = (reason) => buffered.flush(reason);
+  events.destroyAnalytics = () => buffered.destroy();
+  return events;
 }
 
 export type AnalyticsEventsFactory = (

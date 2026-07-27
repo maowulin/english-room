@@ -42,15 +42,14 @@ describe("analytics factory user_id", () => {
 
     const analyticsUserIdBefore = getOrCreateAnalyticsUserId();
     const events = createHttpAnalyticsEvents(client, "app-session-stable-001");
-    await events.guestSessionCreated({
+    events.guestSessionCreated({
       guest_session_id: playerId,
       session_type: "guest",
       player_id: playerId,
       entry_point: "app_open",
     });
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
+    await Promise.resolve();
+    await events.flushAnalytics("manual");
 
     const fetchMock = globalThis.fetch as jest.Mock;
     const analyticsCalls = fetchMock.mock.calls.filter(([url]) =>
@@ -67,6 +66,7 @@ describe("analytics factory user_id", () => {
     expect(record.properties.player_id).toBe(playerId);
     expect(record.app_session_id).toBe("app-session-stable-001");
     expect(String(init.body)).not.toMatch(/secret-token|Mint/i);
+    events.destroyAnalytics();
   });
 
   it("defaultAnalyticsEventsFactory does not POST analytics without access token", async () => {
@@ -79,5 +79,50 @@ describe("analytics factory user_id", () => {
       String(url).includes("/v1/analytics/events"),
     );
     expect(analyticsCalls).toHaveLength(0);
+    if ("destroyAnalytics" in events) {
+      (events as ReturnType<typeof createHttpAnalyticsEvents>).destroyAnalytics();
+    }
+  });
+
+  it("defaultAnalyticsEventsFactory wires buffered HTTP transport for HttpRoomClient", async () => {
+    const playerId = "player-factory-7";
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          player_id: playerId,
+          access_token: "factory-token",
+          profile: { display_name: "Guest" },
+        }),
+      } as Response)
+      .mockResolvedValue({ ok: true, status: 202 } as Response);
+
+    const client = new HttpRoomClient({
+      baseUrl: "http://api.example",
+      fetcher: fetcher as typeof fetch,
+    });
+    await client.createGuestSession({ nickname: "Guest" });
+
+    const events = defaultAnalyticsEventsFactory(client, "app-session-2") as ReturnType<
+      typeof createHttpAnalyticsEvents
+    >;
+    expect(events.flushAnalytics).toBeDefined();
+    expect(events.destroyAnalytics).toBeDefined();
+
+    events.guestSessionCreated({
+      guest_session_id: playerId,
+      session_type: "guest",
+      player_id: playerId,
+      entry_point: "app_open",
+    });
+    await Promise.resolve();
+    await events.flushAnalytics("manual");
+
+    const analyticsCalls = (globalThis.fetch as jest.Mock).mock.calls.filter(([url]) =>
+      String(url).includes("/v1/analytics/events"),
+    );
+    expect(analyticsCalls).toHaveLength(1);
+    events.destroyAnalytics();
   });
 });

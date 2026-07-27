@@ -12,7 +12,17 @@ export type HttpAnalyticsTransportOptions = {
   timeoutMs?: number;
 };
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 3_000;
+
+export class AnalyticsHttpError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "AnalyticsHttpError";
+    this.status = status;
+  }
+}
 const ANALYTICS_EVENTS_PATH = "/v1/analytics/events";
 
 function resolveFetcher(fetcher?: AnalyticsFetcher): AnalyticsFetcher {
@@ -42,7 +52,7 @@ export async function sendAnalyticsEvents(
   }
 
   const fetcher = resolveFetcher(options.fetcher);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -58,7 +68,7 @@ export async function sendAnalyticsEvents(
     });
 
     if (!response.ok) {
-      throw new Error(`Analytics 请求失败（HTTP ${response.status}）`);
+      throw new AnalyticsHttpError(`Analytics 请求失败（HTTP ${response.status}）`, response.status);
     }
   } finally {
     clearTimeout(timeoutId);

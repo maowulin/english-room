@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 
 import { RoomApp } from "@/features/session/room-app";
 import { AnalyticsEvents } from "@/services/analytics-events";
+import { FLUSH_INTERVAL_MS } from "@/services/analytics-batcher";
 import { getOrCreateAnalyticsUserId } from "@/services/analytics-factory";
 import { FakeRoomClient, HttpRoomClient } from "@/services/room-client";
 
@@ -30,6 +31,7 @@ describe("RoomApp analytics", () => {
   afterEach(cleanup);
 
   it("HttpRoomClient login sends guest_session_created with wire user_id matching player_id", async () => {
+    jest.useFakeTimers();
     const playerId = "player-room-app-99";
     const anonymousUserId = getOrCreateAnalyticsUserId();
     const previousApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
@@ -59,12 +61,14 @@ describe("RoomApp analytics", () => {
 
       await act(async () => {
         fireEvent.press(view.getByTestId("login-button"));
+        await Promise.resolve();
+        await Promise.resolve();
       });
 
       await act(async () => {
-        await new Promise<void>((resolve) => {
-          setImmediate(resolve);
-        });
+        jest.advanceTimersByTime(FLUSH_INTERVAL_MS);
+        await Promise.resolve();
+        await Promise.resolve();
       });
 
       const analyticsCalls = fetcher.mock.calls.filter(([url]) =>
@@ -82,6 +86,7 @@ describe("RoomApp analytics", () => {
       expect(guestEvent?.properties.player_id).toBe(playerId);
       expect(String(init.body)).not.toMatch(/room-app-token|Mint/i);
     } finally {
+      jest.useRealTimers();
       process.env.EXPO_PUBLIC_API_BASE_URL = previousApiBaseUrl;
       jest.restoreAllMocks();
     }
