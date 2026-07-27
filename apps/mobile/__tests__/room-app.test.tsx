@@ -101,6 +101,30 @@ describe("RoomApp", () => {
     expect(membersAfter).toBe(membersBefore + 1);
   });
 
+  it("calls joinRoom once when joining by room code", async () => {
+    const client = new FakeRoomClient();
+    const host = await client.createGuestSession({ nickname: "Host" });
+    const created = await client.createRoom({ title: "雾港疑云" });
+    await client.joinRoom(created.id, { playerId: host.playerId });
+
+    const joinRoomSpy = jest.spyOn(client, "joinRoom");
+
+    const view = await render(<RoomApp client={client} />);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+    await act(async () => {
+      fireEvent.changeText(view.getByTestId("room-code-input"), created.code);
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId("submit-room-code-button"));
+    });
+
+    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+    expect(joinRoomSpy).toHaveBeenCalledTimes(1);
+    joinRoomSpy.mockRestore();
+  });
+
   it("lets a ready guest start and end the voice room", async () => {
     const view = await renderFake();
 

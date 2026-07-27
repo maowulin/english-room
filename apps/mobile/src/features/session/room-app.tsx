@@ -455,7 +455,6 @@ export function RoomApp({
     setBusy(true);
     void client
       .getRoomByCode(code)
-      .then((room) => client.joinRoom(room.id, { playerId }))
       .then((room) => enterRoomFlow(room))
       .catch(fail)
       .finally(() => setBusy(false));
