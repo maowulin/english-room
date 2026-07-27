@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   PermissionsAndroid,
   Platform,
@@ -23,7 +23,15 @@ import {
   WaitingScreen,
 } from "./story-screens";
 import { colors, radii, spacing, typography } from "@/theme/tokens";
-import { HttpRoomClient, type RoomClient, type ReportItem, type RoomMember } from "@/services/room-client";
+import {
+  canSendAuthenticatedAnalytics,
+  createAppSessionId,
+  defaultAnalyticsEventsFactory,
+  type AnalyticsEventsFactory,
+} from "@/services/analytics-factory";
+import type { RecordingStatusChangedPayload, ScoreReportViewedPayload } from "@/services/analytics-client";
+import { AnalyticsEvents } from "@/services/analytics-events";
+import { HttpRoomClient, type Room, type RoomClient, type ReportItem, type RoomMember } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
 import { RoomRealtimeClient, type RoomRealtimeClientFactory } from "@/services/realtime-client";
 import { createRtcClient } from "@/services/rtc-factory";
@@ -77,6 +85,44 @@ function scoreJobsTerminal(items: ReportItem[]): boolean {
 
 function scoreJobsReady(items: ReportItem[]): boolean {
   return items.length > 0 && items.every((item) => item.status === "completed");
+}
+
+function clampLatencyMs(startedAt: number): number {
+  return Math.min(600_000, Math.max(0, Date.now() - startedAt));
+}
+
+function mapScoreReportState(
+  report: MediaUiState["report"],
+): ScoreReportViewedPayload["report_state"] {
+  if (report === "ready") return "success";
+  if (report === "failed") return "failed";
+  if (report === "processing") return "processing";
+  return "waiting";
+}
+
+function mapRecordingAnalyticsPayload(
+  endedStatus: Room["status"],
+  media: Pick<MediaUiState, "recording" | "report">,
+  statusSequence: number,
+): Pick<RecordingStatusChangedPayload, "recording_status" | "status_sequence"> {
+  if (endedStatus === "recording_failed" || media.recording === "failed") {
+    return { recording_status: "failed", status_sequence: statusSequence };
+  }
+  if (media.recording === "ready" && media.report === "ready") {
+    return { recording_status: "ready", status_sequence: statusSequence };
+  }
+  if (media.report === "failed") {
+    return { recording_status: "failed", status_sequence: statusSequence };
+  }
+  return { recording_status: "stopping", status_sequence: statusSequence };
+}
+
+function trackAnalytics(action: () => void): void {
+  try {
+    action();
+  } catch {
+    // Analytics must never block UI or session state transitions.
+  }
 }
 
 const seats = [
@@ -195,15 +241,28 @@ export function RoomApp({
   client: injectedClient,
   mediaState: injectedMediaState,
   realtimeClientFactory = defaultRealtimeClientFactory,
+  analyticsEvents: injectedAnalyticsEvents,
+  analyticsEventsFactory = defaultAnalyticsEventsFactory,
 }: {
   client?: RoomClient;
   mediaState?: MediaUiState;
   realtimeClientFactory?: RoomRealtimeClientFactory;
+  analyticsEvents?: AnalyticsEvents;
+  analyticsEventsFactory?: AnalyticsEventsFactory;
 }) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
+  const appSessionId = useMemo(() => createAppSessionId(), []);
+  const appOpenedSentRef = useRef(false);
+  const recordingSequenceRef = useRef(0);
+  const scoreRetryAttemptsRef = useRef(new Map<string, number>());
   const client = useMemo(
     () => injectedClient ?? new HttpRoomClient({ baseUrl: resolveApiBaseUrl() }),
     [injectedClient],
+  );
+  const analyticsEvents = useMemo(
+    () =>
+      injectedAnalyticsEvents ?? analyticsEventsFactory(client, appSessionId),
+    [injectedAnalyticsEvents, analyticsEventsFactory, client, appSessionId],
   );
   const mediaMode = resolveMediaMode(process.env, Platform.OS);
   const rtcRef = useRef<RtcClient | null>(null);
@@ -220,9 +279,19 @@ export function RoomApp({
   const [reportError, setReportError] = useState<string>();
   const playerRef = useRef(state.player);
   const realtimeRef = useRef<ReturnType<RoomRealtimeClientFactory> | null>(null);
+  const maybeEmitAppOpened = useCallback(() => {
+    if (appOpenedSentRef.current || !canSendAuthenticatedAnalytics(client)) {
+      return;
+    }
+    appOpenedSentRef.current = true;
+    trackAnalytics(() => analyticsEvents.appOpened({ entry_point: "cold_start" }));
+  }, [analyticsEvents, client]);
   useEffect(() => {
     playerRef.current = state.player;
   }, [state.player]);
+  useEffect(() => {
+    maybeEmitAppOpened();
+  }, [maybeEmitAppOpened]);
   const roomId = state.room?.id;
   useEffect(() => {
     if (!roomId) return;
@@ -395,15 +464,33 @@ export function RoomApp({
       void rtc.leave().catch(() => undefined);
     }
   };
-  const enterRoomFlow = async (room: RoomSummary & { id: string }) => {
+  const enterRoomFlow = async (
+    room: RoomSummary & { id: string; version?: number },
+    joinMethod: "room_code" | "recent_room" | "deep_link" | "invite",
+    roomRole: "host" | "member",
+  ) => {
     const player = playerRef.current;
     let joinedMembers: RoomMember[] = [];
+    let roomVersion = room.version ?? 1;
     if (player?.id) {
       const joined = await client.joinRoom(room.id, { playerId: player.id });
       joinedMembers = joined.members;
+      roomVersion = joined.version ?? roomVersion;
+      const seatIndex = joinedMembers.findIndex((member) => member.playerId === player.id);
+      trackAnalytics(() =>
+        analyticsEvents.roomJoined({
+          room_id: room.id,
+          player_id: player.id,
+          room_version: roomVersion,
+          join_method: joinMethod,
+          room_role: roomRole,
+          ...(seatIndex >= 0 ? { seat_index: seatIndex } : {}),
+        }),
+      );
     } else {
       const snapshot = await client.getRoom(room.id);
       joinedMembers = snapshot.members;
+      roomVersion = snapshot.version ?? roomVersion;
     }
     dispatch({
       type: "roomJoined",
@@ -425,9 +512,22 @@ export function RoomApp({
     if (busy) return;
     setApiError(undefined);
     setBusy(true);
+    const startedAt = Date.now();
     void client
       .createGuestSession({ nickname: nickname.trim() || "Mint" })
-      .then((player) => dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } }))
+      .then((player) => {
+        trackAnalytics(() =>
+          analyticsEvents.guestSessionCreated({
+            guest_session_id: player.playerId,
+            session_type: "guest",
+            player_id: player.playerId,
+            entry_point: "app_open",
+            latency_ms: clampLatencyMs(startedAt),
+          }),
+        );
+        maybeEmitAppOpened();
+        dispatch({ type: "authenticated", player: { id: player.playerId, nickname: player.nickname } });
+      })
       .catch((error: unknown) => {
         console.error("English Room API login failed:", error instanceof Error ? error.message : String(error));
         fail(error);
@@ -438,9 +538,25 @@ export function RoomApp({
     if (busy) return;
     setApiError(undefined);
     setBusy(true);
+    const startedAt = Date.now();
     void client
       .createRoom({ title: "雾港疑云" })
-      .then((room) => enterRoomFlow(room))
+      .then(async (room) => {
+        const playerId = playerRef.current?.id;
+        if (playerId) {
+          trackAnalytics(() =>
+            analyticsEvents.roomCreated({
+              room_id: room.id,
+              player_id: playerId,
+              room_version: room.version ?? 1,
+              room_role: "host",
+              creation_mode: "quick_create",
+              latency_ms: clampLatencyMs(startedAt),
+            }),
+          );
+        }
+        await enterRoomFlow(room, "invite", "host");
+      })
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -455,7 +571,7 @@ export function RoomApp({
     setBusy(true);
     void client
       .getRoomByCode(code)
-      .then((room) => enterRoomFlow(room))
+      .then((room) => enterRoomFlow(room, "room_code", "member"))
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -466,13 +582,25 @@ export function RoomApp({
     const nextReady = !state.ready;
     void client
       .setReady(roomId, nextReady)
-      .then((room) =>
+      .then((room) => {
+        const playerId = playerRef.current?.id;
+        if (playerId) {
+          trackAnalytics(() =>
+            analyticsEvents.roomReadyChanged({
+              room_id: roomId,
+              player_id: playerId,
+              ready_state: nextReady ? "ready" : "not_ready",
+              room_version: room.version ?? 1,
+              change_source: "user",
+            }),
+          );
+        }
         dispatch({
           type: "readyChanged",
           ready: nextReady,
           members: mapRoomMembers(room.members, playerRef.current),
-        }),
-      )
+        });
+      })
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -480,9 +608,23 @@ export function RoomApp({
     if (!roomId || busy) return;
     setApiError(undefined);
     setBusy(true);
+    const startedAt = Date.now();
     void client
       .startRoom(roomId)
-      .then(() => dispatch({ type: "roomStarted" }))
+      .then((room) => {
+        trackAnalytics(() =>
+          analyticsEvents.roomStarted({
+            room_id: roomId,
+            room_version: room.version ?? 1,
+            member_count: room.members.length,
+            ready_member_count: room.members.filter((member) => member.ready).length,
+            started_by_player_id: playerRef.current?.id ?? room.members[0]?.playerId ?? "",
+            start_mode: "host_action",
+            latency_ms: clampLatencyMs(startedAt),
+          }),
+        );
+        dispatch({ type: "roomStarted" });
+      })
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -498,21 +640,62 @@ export function RoomApp({
           void rtcRef.current.leave().catch(() => undefined);
         }
         const ended = await client.endRoom(roomId);
+        let nextRecording: MediaUiState["recording"] = "processing";
+        let nextReport: MediaUiState["report"] = "processing";
         if (ended.status === "recording_failed") {
-          setLiveMedia((current) => ({ ...current, recording: "failed", report: "failed" }));
+          nextRecording = "failed";
+          nextReport = "failed";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
         } else {
-          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
         }
         const report = await client.getRoomReport(roomId);
         setReportItems(report.items);
         if (ended.status === "recording_failed") {
           // already failed above
         } else if (scoreJobsReady(report.items)) {
-          setLiveMedia((current) => ({ ...current, recording: "ready", report: "ready" }));
+          nextRecording = "ready";
+          nextReport = "ready";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
         } else if (scoreJobsTerminal(report.items)) {
-          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+          nextRecording = "ready";
+          nextReport = "failed";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
         } else {
-          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+          nextRecording = "processing";
+          nextReport = "processing";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
+        }
+        const playerId = playerRef.current?.id;
+        if (playerId) {
+          recordingSequenceRef.current += 1;
+          trackAnalytics(() =>
+            analyticsEvents.roomEnded({
+              room_id: roomId,
+              room_version: ended.version ?? 1,
+              ended_by_player_id: playerId,
+              end_reason: "host_action",
+              member_count: ended.members.length,
+            }),
+          );
+          trackAnalytics(() =>
+            analyticsEvents.recordingStatusChanged({
+              room_id: roomId,
+              ...mapRecordingAnalyticsPayload(
+                ended.status,
+                { recording: nextRecording, report: nextReport },
+                recordingSequenceRef.current,
+              ),
+            }),
+          );
+          trackAnalytics(() =>
+            analyticsEvents.scoreReportViewed({
+              room_id: roomId,
+              player_id: playerId,
+              report_state: mapScoreReportState(nextReport),
+              entry_point: "room_end",
+            }),
+          );
         }
         dispatch({ type: "roomEnded" });
       } catch (error) {
@@ -524,7 +707,30 @@ export function RoomApp({
     })();
   };
   const retry = (item: ReportItem) => {
-    void client.retryScoreJob(item.scoreJobId).then((next) => setReportItems((items) => items.map((current) => current.scoreJobId === next.scoreJobId ? next : current))).catch(() => setReportError("报告加载失败，请重试"));
+    const startedAt = Date.now();
+    void client
+      .retryScoreJob(item.scoreJobId)
+      .then((next) => {
+        const playerId = playerRef.current?.id;
+        if (playerId && roomId) {
+          const attempt = (scoreRetryAttemptsRef.current.get(item.scoreJobId) ?? 0) + 1;
+          scoreRetryAttemptsRef.current.set(item.scoreJobId, attempt);
+          trackAnalytics(() =>
+            analyticsEvents.scoreRetryRequested({
+              room_id: roomId,
+              player_id: playerId,
+              score_job_id: item.scoreJobId,
+              attempt_number: attempt,
+              retry_reason: "user_action",
+              latency_ms: clampLatencyMs(startedAt),
+            }),
+          );
+        }
+        setReportItems((items) =>
+          items.map((current) => (current.scoreJobId === next.scoreJobId ? next : current)),
+        );
+      })
+      .catch(() => setReportError("报告加载失败，请重试"));
   };
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen busy={busy} mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
