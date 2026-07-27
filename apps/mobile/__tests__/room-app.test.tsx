@@ -269,6 +269,17 @@ describe("RoomApp", () => {
 
     expect(await view.findByText("真实语音模式 · TRTC/SOE")).toBeTruthy();
     expect(view.queryByText("Demo / Fake 控制面 · 非真实 TRTC/SOE")).toBeNull();
+    expect(view.queryByText("ROOM DEMO")).toBeNull();
+    expect(view.getByText("ROOM LIVE")).toBeTruthy();
+  });
+
+  it("keeps demo lobby ROOM DEMO label", async () => {
+    const view = await renderFake();
+    await act(async () => {
+      fireEvent.press(view.getByTestId("login-button"));
+    });
+    expect(await view.findByText("ROOM DEMO")).toBeTruthy();
+    expect(view.queryByText("ROOM LIVE")).toBeNull();
   });
 
   it.each([

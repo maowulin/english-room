@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { sessionReducer, initialSessionState, type Screen } from "./session-reducer";
+import { sessionReducer, initialSessionState, type Screen, type RoomSummary } from "./session-reducer";
 import { AuthScreen as VisualAuthScreen } from "./auth-screen";
 import {
   demoMediaUiState,
@@ -191,8 +191,8 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
           },
           onNetwork: (quality) => setLiveMedia((current) => ({ ...current, network: quality })),
         });
-      } catch (error) {
-        setApiError(error instanceof Error ? error.message : String(error));
+      } catch {
+        // Fail closed into media UI state; do not surface a status-bar "API:" line.
         setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "joinFailed" }));
       }
     });
@@ -212,15 +212,36 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     return granted;
   };
   const prepareRealMedia = async (roomId: string) => {
+    // Media failures must surface inside waiting/live via MediaUiState, never block
+    // roomJoined or rely on a top-of-screen "API:" status-bar error.
     if (mediaMode !== "real" || injectedMediaState) return;
     const rtc = rtcRef.current;
-    if (!rtc) throw new Error("真实语音模式 TRTC 客户端未就绪");
+    if (!rtc) {
+      setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "joinFailed" }));
+      return;
+    }
     const permitted = await ensureMicPermission();
-    if (!permitted) throw new Error("麦克风权限被拒绝");
+    if (!permitted) {
+      // permission already set to denied; keep rtc/grant idle so WaitingMediaNotice shows.
+      setLiveMedia((current) => ({ ...current, grant: "idle", rtc: "idle" }));
+      return;
+    }
     setLiveMedia((current) => ({ ...current, grant: "loading", rtc: "joining" }));
-    const grant = await client.issueRtcGrant(roomId);
-    setLiveMedia((current) => ({ ...current, grant: "ready" }));
-    await rtc.join(grant);
+    try {
+      const grant = await client.issueRtcGrant(roomId);
+      setLiveMedia((current) => ({ ...current, grant: "ready" }));
+      try {
+        await rtc.join(grant);
+      } catch {
+        setLiveMedia((current) => ({ ...current, rtc: "joinFailed" }));
+      }
+    } catch {
+      setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "idle" }));
+    }
+  };
+  const enterRoomFlow = async (room: RoomSummary & { id: string }) => {
+    dispatch({ type: "roomJoined", room: { id: room.id, code: room.code, title: room.title } });
+    await prepareRealMedia(room.id);
   };
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -245,10 +266,7 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     setBusy(true);
     void client
       .createRoom({ title: "雾港疑云" })
-      .then(async (room) => {
-        await prepareRealMedia(room.id);
-        dispatch({ type: "roomJoined", room });
-      })
+      .then((room) => enterRoomFlow(room))
       .catch(fail)
       .finally(() => setBusy(false));
   };
@@ -264,10 +282,7 @@ export function RoomApp({ client: injectedClient, mediaState: injectedMediaState
     void client
       .getRoomByCode(code)
       .then((room) => client.joinRoom(room.id, { playerId }))
-      .then(async (room) => {
-        await prepareRealMedia(room.id);
-        dispatch({ type: "roomJoined", room });
-      })
+      .then((room) => enterRoomFlow(room))
       .catch(fail)
       .finally(() => setBusy(false));
   };

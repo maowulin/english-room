@@ -43,11 +43,15 @@ function WaitingMediaNotice({ mediaState }: { mediaState: MediaUiState }) {
       ? "麦克风权限被拒绝，请在系统设置中开启后重试"
       : mediaState.grant === "loading"
         ? "正在获取语音凭证"
-        : mediaState.rtc === "joining"
-          ? "正在连接语音房间"
-          : mediaReady(mediaState)
-            ? "麦克风与语音房间已就绪"
-            : "等待麦克风授权与语音入房";
+        : mediaState.grant === "failed"
+          ? "语音凭证获取失败，请稍后重试"
+          : mediaState.rtc === "joining"
+            ? "正在连接语音房间"
+            : mediaState.rtc === "joinFailed"
+              ? "语音入房失败，请稍后重试"
+            : mediaReady(mediaState)
+              ? "麦克风与语音房间已就绪"
+              : "等待麦克风授权与语音入房";
   return <View style={[styles.micCheck, styles.realMediaNotice]}><Text style={styles.micLarge}>♩</Text><Text style={styles.realMediaText}>{message}</Text></View>;
 }
 
@@ -120,7 +124,7 @@ export function LobbyScreen({
     onJoin(trimmed);
   };
   return <SafeAreaView style={styles.safe}><View style={styles.lobby}><Header title="" /><Text style={mediaState.mode === "real" ? styles.realChip : styles.demoChip} accessibilityLabel={mediaState.mode === "real" ? "真实语音模式" : "Demo 控制面"}>{mediaState.mode === "real" ? "真实语音模式 · TRTC/SOE" : "Demo / Fake 控制面 · 非真实 TRTC/SOE"}</Text><Text style={styles.lobbyTitle}>用英语进入今晚的故事</Text><Text style={styles.lobbyPrompt}>今晚想练哪一句？</Text><View style={styles.smallRule}><View /><Text>✦</Text><View /></View>
-    <View style={styles.portCard}><View style={styles.portMist} /><Text style={styles.portName}>●  雾港疑云</Text><Text style={styles.roomPill}>ROOM DEMO</Text><View style={styles.ship}><View style={styles.mast}/><View style={styles.hull}/></View><View style={styles.avatarGroup}><Text>林</Text><Text>M</Text><Text>A</Text><Text>苏</Text><Text>+2</Text></View><Text style={styles.portMeta}>♧  4 / 6 位玩家   |   ◷ 预计 25 分钟</Text></View>
+    <View style={styles.portCard}><View style={styles.portMist} /><Text style={styles.portName}>●  雾港疑云</Text><Text style={styles.roomPill}>{mediaState.mode === "real" ? "ROOM LIVE" : "ROOM DEMO"}</Text><View style={styles.ship}><View style={styles.mast}/><View style={styles.hull}/></View><View style={styles.avatarGroup}><Text>林</Text><Text>M</Text><Text>A</Text><Text>苏</Text><Text>+2</Text></View><Text style={styles.portMeta}>♧  4 / 6 位玩家   |   ◷ 预计 25 分钟</Text></View>
     <Pressable accessibilityLabel="加入语音房间" disabled={!canJoin} onPress={submitJoin} style={[styles.primaryCta, !canJoin && styles.ctaDisabled]} testID="join-room-button"><Text style={styles.ctaText}>{busy ? "加入中…" : "♩          加入语音房间                         ›"}</Text></Pressable>
     <Pressable accessibilityLabel="创建新房间" disabled={busy} onPress={onCreate} style={[styles.outlineCta, busy && styles.ctaDisabled]} testID="create-room-button"><Text style={styles.outlineText}>{busy ? "创建中…" : "⌂          创建新房间                         ›"}</Text></Pressable>
     <View style={[styles.codeCta, !trimmed && styles.codeCtaEmpty]}><Text style={styles.outlineText}>▦</Text><TextInput accessibilityLabel="房间码" autoCapitalize="characters" editable={!busy} onChangeText={(value) => { setCode(value); if (value.trim()) setJoinHint(undefined); }} placeholder="输入房间码" placeholderTextColor="#63756B" style={styles.codeInput} testID="room-code-input" value={code}/><Pressable accessibilityLabel="输入房间码" disabled={!canJoin} onPress={submitJoin} testID="submit-room-code-button"><Text style={[styles.outlineText, !canJoin && styles.outlineDisabled]}>›</Text></Pressable></View>
