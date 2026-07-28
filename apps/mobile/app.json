@@ -11,7 +11,15 @@
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.maowulin.englishroomdemo",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "English Room 需要麦克风权限以进行真实语音练习"
+        "NSMicrophoneUsageDescription": "English Room 需要麦克风权限以进行真实语音练习",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {
+            "111.230.56.187": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
       },
       "appleTeamId": "N6HVZ24ZK9"
     },
