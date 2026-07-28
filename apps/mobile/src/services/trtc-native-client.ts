@@ -35,9 +35,14 @@ export type TrtcNativeClientOptions = {
   audioRouteSpeaker: number;
   audioRouteEarpiece: number;
   volumeIntervalMs?: number;
+  /** Max wait for onEnterRoom after native enterRoom resolves (ms). */
+  joinAckTimeoutMs?: number;
   /** Max wait for onExitRoom before leave resolves fail-open (ms). */
   leaveAckTimeoutMs?: number;
 };
+
+/** Default TRTC join ack window — long enough for cold native SDK, bounded for UX recovery. */
+export const DEFAULT_JOIN_ACK_TIMEOUT_MS = 30_000;
 
 function isGrant(input: RtcGrantCredentials | { roomId: string; userId: string }): input is RtcGrantCredentials {
   return "strRoomId" in input && "sdkAppId" in input && "userSig" in input && "trtcUserId" in input;
@@ -61,13 +66,16 @@ export class TrtcNativeClient implements RtcClient {
   private readonly audioRouteSpeaker: number;
   private readonly audioRouteEarpiece: number;
   private readonly volumeIntervalMs: number;
+  private readonly joinAckTimeoutMs: number;
   private readonly leaveAckTimeoutMs: number;
   private readonly listener: TrtcListener;
   private subscriptions: RtcSubscriptions = {};
   private enterResolve: (() => void) | undefined;
   private enterReject: ((error: Error) => void) | undefined;
+  private joinAckTimer: ReturnType<typeof setTimeout> | undefined;
   private exitResolve: (() => void) | undefined;
   private leavePromise: Promise<void> | undefined;
+  private localUserId: string | undefined;
   private disposed = false;
   private state: RtcState = {
     joined: false,
@@ -83,6 +91,7 @@ export class TrtcNativeClient implements RtcClient {
     this.audioRouteSpeaker = options.audioRouteSpeaker;
     this.audioRouteEarpiece = options.audioRouteEarpiece;
     this.volumeIntervalMs = options.volumeIntervalMs ?? 300;
+    this.joinAckTimeoutMs = options.joinAckTimeoutMs ?? DEFAULT_JOIN_ACK_TIMEOUT_MS;
     this.leaveAckTimeoutMs = options.leaveAckTimeoutMs ?? 3000;
     this.listener = (type, params) => this.handleListener(type, params);
     this.cloud.registerListener(this.listener);
@@ -93,18 +102,19 @@ export class TrtcNativeClient implements RtcClient {
       throw new Error("TRTC client disposed");
     }
     if (!isGrant(input)) {
-      throw new Error("真实语音入房需要 Backend RTC grant（含 str_room_id / user_sig）");
+      throw new Error("Joining a real voice room requires a backend RTC grant (including str_room_id / user_sig)");
     }
     if (this.leavePromise) {
-      throw new Error("正在退房，完成 onExitRoom 前不可重新入房");
+      throw new Error("Leaving the room is in progress; rejoining is unavailable until onExitRoom completes");
     }
     if (this.state.joined) {
-      throw new Error("已在房间内，请先 leave 再 join");
+      throw new Error("Already in a room; leave before joining another one");
     }
     if (this.state.connection === "joining" || this.enterResolve || this.enterReject) {
-      throw new Error("入房进行中，禁止重复 join");
+      throw new Error("A room join is already in progress; duplicate joins are not allowed");
     }
 
+    this.localUserId = input.trtcUserId;
     this.patch({ connection: "joining", joined: false });
     const entered = new Promise<void>((resolve, reject) => {
       this.enterResolve = resolve;
@@ -122,11 +132,25 @@ export class TrtcNativeClient implements RtcClient {
         this.sceneAudioCall,
       );
     } catch (error) {
+      this.clearJoinAckTimer();
       this.clearEnterWaiters();
       this.patch({ connection: "joinFailed", joined: false });
       throw error instanceof Error ? error : new Error(String(error));
     }
-    await entered;
+    this.joinAckTimer = setTimeout(() => {
+      this.joinAckTimer = undefined;
+      if (!this.enterReject) {
+        return;
+      }
+      this.failPendingJoin(new Error(`TRTC enterRoom ack timeout (${this.joinAckTimeoutMs}ms)`));
+    }, this.joinAckTimeoutMs);
+    try {
+      await entered;
+    } catch (error) {
+      this.clearJoinAckTimer();
+      throw error;
+    }
+    this.clearJoinAckTimer();
     try {
       await this.cloud.startLocalAudio(this.audioQualitySpeech);
       await this.cloud.setAudioRoute(this.audioRouteSpeaker);
@@ -170,6 +194,7 @@ export class TrtcNativeClient implements RtcClient {
         if (this.state.joined || this.state.connection === "joining") {
           this.patch({ joined: false, connection: "disconnected" });
         }
+        this.localUserId = undefined;
         this.exitResolve = undefined;
         this.leavePromise = undefined;
       }
@@ -209,6 +234,7 @@ export class TrtcNativeClient implements RtcClient {
       return;
     }
     this.disposed = true;
+    this.clearJoinAckTimer();
     this.clearEnterWaiters(new Error("TRTC client disposed"));
     this.exitResolve = undefined;
     this.leavePromise = undefined;
@@ -218,8 +244,26 @@ export class TrtcNativeClient implements RtcClient {
       });
     }
     this.patch({ joined: false, connection: "disconnected" });
+    this.localUserId = undefined;
     this.subscriptions = {};
     this.cloud.unRegisterListener(this.listener);
+  }
+
+  private clearJoinAckTimer() {
+    if (this.joinAckTimer) {
+      clearTimeout(this.joinAckTimer);
+      this.joinAckTimer = undefined;
+    }
+  }
+
+  private failPendingJoin(reason: Error) {
+    this.clearJoinAckTimer();
+    this.patch({ connection: "joinFailed", joined: false });
+    this.enterReject?.(reason);
+    this.clearEnterWaiters();
+    void this.cloud.exitRoom().catch(() => {
+      // Best-effort native cleanup after failed or timed-out join.
+    });
   }
 
   private clearEnterWaiters(rejectReason?: Error) {
@@ -238,12 +282,11 @@ export class TrtcNativeClient implements RtcClient {
       case "onEnterRoom": {
         const result = Number(params.result ?? 0);
         if (result > 0) {
+          this.clearJoinAckTimer();
           this.enterResolve?.();
           this.clearEnterWaiters();
         } else {
-          this.patch({ connection: "joinFailed", joined: false });
-          this.enterReject?.(new Error(`TRTC enterRoom failed: ${result}`));
-          this.clearEnterWaiters();
+          this.failPendingJoin(new Error(`TRTC enterRoom failed: ${result}`));
         }
         return;
       }
@@ -259,8 +302,12 @@ export class TrtcNativeClient implements RtcClient {
         this.patch({ connection: "reconnecting" });
         return;
       case "onConnectionLost":
-        // Lost is disconnect truth; only onTryToReconnect means actively reconnecting.
-        this.patch({ connection: "disconnected" });
+        if (this.state.connection === "joining") {
+          this.failPendingJoin(new Error("TRTC connection lost while joining"));
+        } else {
+          // Lost is disconnect truth; only onTryToReconnect means actively reconnecting.
+          this.patch({ connection: "disconnected" });
+        }
         return;
       case "onConnectionRecovery":
         this.patch({ connection: "connected" });
@@ -284,7 +331,12 @@ export class TrtcNativeClient implements RtcClient {
         for (const item of userVolumes) {
           const row = item as { userId?: string; volume?: number };
           if (typeof row.userId === "string") {
-            this.subscriptions.onUserVoiceVolume?.(row.userId, Number(row.volume ?? 0));
+            const volume = Number(row.volume ?? 0);
+            if (row.userId === this.localUserId) {
+              this.subscriptions.onLocalVoiceVolume?.(volume);
+            } else {
+              this.subscriptions.onUserVoiceVolume?.(row.userId, volume);
+            }
           }
         }
         return;

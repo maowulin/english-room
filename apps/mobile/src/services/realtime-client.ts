@@ -24,7 +24,7 @@ export type WebSocketFactory = (
   options?: WebSocketConnectOptions,
 ) => WebSocket;
 
-export type RealtimeRoomMember = { playerId: string; ready: boolean };
+export type RealtimeRoomMember = { playerId: string; displayName?: string; ready: boolean };
 
 /** Wire-format room view derived from server payloads only (not app-authoritative state). */
 export type RealtimeRoomView = {
@@ -33,6 +33,7 @@ export type RealtimeRoomView = {
   title: string;
   status: "waiting" | "live" | "ended" | "recording_failed";
   version: number;
+  ownerPlayerId?: string;
   members: RealtimeRoomMember[];
 };
 
@@ -50,7 +51,8 @@ type BackendRoomPayload = {
   title: string;
   status: string;
   version: number;
-  members: { player_id: string; ready: boolean }[];
+  owner_player_id?: string | null;
+  members: { player_id: string; display_name?: string; ready: boolean }[];
 };
 
 type RoomEnvelope = {
@@ -90,7 +92,7 @@ function defaultWebSocketFactory(
       ) => WebSocket)
     | undefined;
   if (!WebSocketCtor) {
-    throw new Error("当前运行环境未提供 WebSocket，无法连接房间事件流");
+    throw new Error("WebSocket is unavailable in this runtime; cannot connect to the room event stream");
   }
   return new WebSocketCtor(url, protocols ?? null, options);
 }
@@ -102,8 +104,10 @@ function mapRoomPayload(snapshot: BackendRoomPayload): RealtimeRoomView {
     title: snapshot.title,
     status: mapBackendRoomStatus(snapshot.status),
     version: snapshot.version,
+    ownerPlayerId: snapshot.owner_player_id ?? undefined,
     members: snapshot.members.map((member) => ({
       playerId: member.player_id,
+      displayName: member.display_name,
       ready: member.ready,
     })),
   };
@@ -174,7 +178,7 @@ export class RoomRealtimeClient {
       this.handleMessage(data);
     };
     socket.onerror = () => {
-      this.emitProtocolError("WebSocket 连接错误");
+    this.emitProtocolError("WebSocket connection error");
     };
   }
 
@@ -214,11 +218,11 @@ export class RoomRealtimeClient {
   private handleMessage(raw: string): void {
     const envelope = parseEnvelope(raw);
     if (!envelope || !isSupportedEnvelope(envelope)) {
-      this.emitProtocolError("无效的房间事件 envelope");
+      this.emitProtocolError("Invalid room event envelope");
       return;
     }
     if (this.connectedRoomId && envelope.room_id !== this.connectedRoomId) {
-      this.emitProtocolError("room_id 与当前连接不匹配");
+      this.emitProtocolError("room_id does not match the current connection");
       return;
     }
     if (envelope.room_version <= this.lastAppliedVersion) {
@@ -229,7 +233,7 @@ export class RoomRealtimeClient {
     try {
       room = mapRoomPayload(envelope.payload.room);
     } catch (error) {
-      this.emitProtocolError(error instanceof Error ? error.message : "房间 payload 解析失败");
+      this.emitProtocolError(error instanceof Error ? error.message : "Failed to parse room payload");
       return;
     }
 

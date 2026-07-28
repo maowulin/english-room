@@ -6,6 +6,7 @@ export type Player = {
 export type RoomMemberView = {
   playerId: string;
   nickname: string;
+  isLocal: boolean;
   ready: boolean;
 };
 
@@ -13,6 +14,7 @@ export type RoomSummary = {
   id: string;
   code: string;
   title: string;
+  ownerPlayerId?: string;
 };
 
 export type Screen = "login" | "register" | "lobby" | "waiting" | "live" | "report";

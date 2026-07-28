@@ -146,6 +146,32 @@ it("maps reconnect and network events orthogonally", async () => {
   expect(networks).toEqual(["bad"]);
 });
 
+it("routes local TRTC volume to the local voice callback and remotes separately", async () => {
+  const { cloud, emit } = createCloud();
+  const rtc = new TrtcNativeClient({
+    cloud,
+    sceneAudioCall: 2,
+    audioQualitySpeech: 1,
+    audioRouteSpeaker: 0,
+    audioRouteEarpiece: 1,
+  });
+  const localVolumes: number[] = [];
+  const remoteVolumes: Array<[string, number]> = [];
+  rtc.subscribe({
+    onLocalVoiceVolume: (volume) => localVolumes.push(volume),
+    onUserVoiceVolume: (userId, volume) => remoteVolumes.push([userId, volume]),
+  });
+
+  const joining = rtc.join(grant({ trtcUserId: "u_local" }));
+  emit("onEnterRoom", { result: 1 });
+  await joining;
+
+  emit("onUserVoiceVolume", { userVolumes: [{ userId: "u_local", volume: 42 }, { userId: "u_remote", volume: 27 }] });
+
+  expect(localVolumes).toEqual([42]);
+  expect(remoteVolumes).toEqual([["u_remote", 27]]);
+});
+
 it("rejects reentrant join and cleans ACK reject into joinFailed", async () => {
   const { cloud, emit } = createCloud();
   const rtc = new TrtcNativeClient({
@@ -157,11 +183,11 @@ it("rejects reentrant join and cleans ACK reject into joinFailed", async () => {
   });
 
   const first = rtc.join(grant());
-  await expect(rtc.join(grant())).rejects.toThrow(/入房进行中|已在房间/);
+  await expect(rtc.join(grant())).rejects.toThrow(/join is already in progress|Already in a room/);
   emit("onEnterRoom", { result: 1 });
   await first;
 
-  await expect(rtc.join(grant())).rejects.toThrow(/已在房间/);
+  await expect(rtc.join(grant())).rejects.toThrow(/Already in a room/);
 
   const { cloud: cloud2, emit: emit2 } = createCloud();
   cloud2.enterRoom = async () => {
@@ -238,7 +264,7 @@ it("shares in-flight leave and blocks join until leave settles", async () => {
 
   const leaveA = rtc.leave();
   const leaveB = rtc.leave();
-  await expect(rtc.join(grant())).rejects.toThrow(/离开|退房/);
+  await expect(rtc.join(grant())).rejects.toThrow(/Leaving the room is in progress/);
   emit("onExitRoom", { reason: 0 });
   await Promise.all([leaveA, leaveB]);
   expect(rtc.getState()).toMatchObject({ joined: false, connection: "disconnected" });
@@ -268,6 +294,50 @@ it("ignores late listener callbacks after dispose and rejects join", async () =>
   expect(rtc.getState()).toMatchObject({ joined: false, connection: "disconnected" });
 
   await expect(rtc.join(grant())).rejects.toThrow(/disposed|dispose/i);
+});
+
+it("rejects join when onEnterRoom ack times out, cleans state, and allows retry", async () => {
+  jest.useFakeTimers();
+  const { cloud, calls, emit } = createCloud();
+  const rtc = new TrtcNativeClient({
+    cloud,
+    sceneAudioCall: 2,
+    audioQualitySpeech: 1,
+    audioRouteSpeaker: 0,
+    audioRouteEarpiece: 1,
+    joinAckTimeoutMs: 50,
+  });
+
+  const joining = rtc.join(grant());
+  await Promise.resolve();
+  jest.advanceTimersByTime(50);
+
+  await expect(joining).rejects.toThrow(/enterRoom ack timeout/i);
+  expect(rtc.getState()).toMatchObject({ connection: "joinFailed", joined: false });
+  expect(calls).toContain("exitRoom");
+
+  const second = rtc.join(grant());
+  emit("onEnterRoom", { result: 1 });
+  await second;
+  expect(rtc.getState()).toMatchObject({ joined: true, connection: "connected" });
+  jest.useRealTimers();
+});
+
+it("fails join on connection lost while waiting for onEnterRoom", async () => {
+  const { cloud, emit } = createCloud();
+  const rtc = new TrtcNativeClient({
+    cloud,
+    sceneAudioCall: 2,
+    audioQualitySpeech: 1,
+    audioRouteSpeaker: 0,
+    audioRouteEarpiece: 1,
+    joinAckTimeoutMs: 30_000,
+  });
+
+  const joining = rtc.join(grant());
+  emit("onConnectionLost", {});
+  await expect(joining).rejects.toThrow(/connection lost while joining/i);
+  expect(rtc.getState()).toMatchObject({ connection: "joinFailed", joined: false });
 });
 
 it("best-effort exitRoom on dispose when connected without waiting for onExitRoom", async () => {

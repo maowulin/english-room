@@ -26,19 +26,23 @@ type RoomView = Awaited<ReturnType<typeof render>>;
 
 async function enterLive(view: RoomView) {
   await act(async () => {
-    fireEvent.press(view.getByTestId("login-button"));
+    fireEvent.press(view.getByTestId("demo-guest-button"));
   });
   await act(async () => {
     fireEvent.press(await view.findByTestId("create-room-button"));
   });
-  expect(await view.findByText("等待同伴入座")).toBeTruthy();
+  expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
+  expect(await view.findByText("Microphone is listening")).toBeTruthy();
   await act(async () => {
     fireEvent.press(view.getByTestId("ready-button"));
   });
   await act(async () => {
+    await Promise.resolve();
+  });
+  await act(async () => {
     fireEvent.press(view.getByTestId("start-room-button"));
   });
-  expect(await view.findByText("正在练习")).toBeTruthy();
+  expect(await view.findByText("In progress")).toBeTruthy();
 }
 
 describe("RoomApp real media lifecycle", () => {
@@ -63,16 +67,16 @@ describe("RoomApp real media lifecycle", () => {
     const view = await render(<RoomApp client={new FakeRoomClient()} />);
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
     });
-    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+    expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
     expect(mockJoin).toHaveBeenCalled();
 
     await act(async () => {
-      fireEvent.press(view.getByLabelText("离开房间"));
+      fireEvent.press(view.getByLabelText("Leave room"));
     });
     expect(mockLeave).toHaveBeenCalled();
 
@@ -82,7 +86,34 @@ describe("RoomApp real media lifecycle", () => {
     expect(mockUnsubscribe).toHaveBeenCalled();
     expect(mockDispose).toHaveBeenCalled();
   });
-  it("ends room without awaiting RTC leave and keeps report processing when jobs incomplete", async () => {
+  it("retry voice connection leaves RTC and re-issues join after prepare failure", async () => {
+    mockJoin.mockRejectedValueOnce(new Error("TRTC enterRoom ack timeout"));
+    mockJoin.mockResolvedValueOnce(undefined);
+
+    const view = await render(<RoomApp client={new FakeRoomClient()} />);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("demo-guest-button"));
+    });
+    await act(async () => {
+      fireEvent.press(await view.findByTestId("create-room-button"));
+    });
+    expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockJoin).toHaveBeenCalledTimes(1);
+
+    const retry = await view.findByLabelText("Retry voice connection");
+    await act(async () => {
+      fireEvent.press(retry);
+      await Promise.resolve();
+    });
+
+    expect(mockLeave).toHaveBeenCalled();
+    expect(mockJoin).toHaveBeenCalledTimes(2);
+  });
+
+  it("ends room without awaiting RTC leave and shows report loading when jobs are incomplete", async () => {
     let resolveLeave: (() => void) | undefined;
     mockLeave.mockImplementationOnce(
       () =>
@@ -99,14 +130,14 @@ describe("RoomApp real media lifecycle", () => {
     });
 
     // Control plane must reach report even while leave is still pending.
-    expect(await view.findByText("本局口语报告")).toBeTruthy();
-    expect(view.getByText("录音上传中")).toBeTruthy();
-    expect(view.getByText("报告生成中")).toBeTruthy();
-    expect(view.getByText("等待全员评分完成")).toBeTruthy();
-    expect(view.queryByText("表现优秀")).toBeNull();
+    expect(await view.findByTestId("report-loading-screen")).toBeTruthy();
+    expect(view.getByText("Generating your speaking report")).toBeTruthy();
+    expect(view.queryByText("—")).toBeNull();
+    expect(view.queryByText("Great performance")).toBeNull();
     expect(resolveLeave).toBeDefined();
     await act(async () => {
       resolveLeave?.();
     });
   });
+
 });

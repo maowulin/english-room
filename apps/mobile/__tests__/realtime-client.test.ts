@@ -27,7 +27,7 @@ function backendRoom(overrides: Record<string, unknown> = {}) {
   return {
     room_id: "room-1",
     room_code: "4827",
-    title: "雾港疑云",
+    title: "Harbor Mystery",
     status: "lobby",
     version: 1,
     members: [{ player_id: "p1", ready: false }],

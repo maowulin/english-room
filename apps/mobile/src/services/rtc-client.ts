@@ -34,6 +34,7 @@ export type RtcSubscriptions = {
   onRemoteUserLeave?: (userId: string) => void;
   onUserAudioAvailable?: (userId: string, available: boolean) => void;
   onUserVoiceVolume?: (userId: string, volume: number) => void;
+  onLocalVoiceVolume?: (volume: number) => void;
 };
 
 export interface RtcClient {
@@ -114,4 +115,15 @@ export function resolveMediaMode(
   }
   if (platform === "web") return "web";
   return "demo";
+}
+
+/** Native release builds must never depend on a runtime env object for voice mode. */
+export function resolveAppMediaMode(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = "native",
+  isDevelopmentBuild = false,
+): MediaRuntimeMode {
+  if (platform === "web") return "web";
+  if (!isDevelopmentBuild) return "real";
+  return resolveMediaMode(env, platform);
 }

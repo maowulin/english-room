@@ -19,6 +19,7 @@ import {
   LobbyScreen,
   type LiveRemoteSeat,
   type MediaUiState,
+  ReportLoadingScreen,
   ReportScreen,
   WaitingScreen,
 } from "./story-screens";
@@ -31,11 +32,11 @@ import {
 } from "@/services/analytics-factory";
 import type { RecordingStatusChangedPayload, ScoreReportViewedPayload } from "@/services/analytics-client";
 import { AnalyticsEvents } from "@/services/analytics-events";
-import { HttpRoomClient, type Room, type RoomClient, type ReportItem, type RoomMember } from "@/services/room-client";
+import { HttpRoomClient, type Room, type RoomClient, type RoomMember, type RoomReport, type ReportItem } from "@/services/room-client";
 import { resolveApiBaseUrl } from "@/services/api-base-url";
 import { RoomRealtimeClient, type RoomRealtimeClientFactory } from "@/services/realtime-client";
 import { createRtcClient } from "@/services/rtc-factory";
-import { resolveMediaMode, type RtcClient } from "@/services/rtc-client";
+import { resolveAppMediaMode, type RtcClient } from "@/services/rtc-client";
 
 function mapRtcToMedia(rtc: string): MediaUiState["rtc"] {
   if (rtc === "connected") return "joined";
@@ -48,11 +49,18 @@ function mapRtcToMedia(rtc: string): MediaUiState["rtc"] {
 }
 
 function mapRoomMembers(members: RoomMember[], player?: { id: string; nickname: string }): RoomMemberView[] {
-  return members.map((member) => ({
-    playerId: member.playerId,
-    nickname: member.playerId === player?.id ? player.nickname : member.playerId,
-    ready: member.ready,
-  }));
+  const seen = new Set<string>();
+  return members.flatMap((member) => {
+    if (seen.has(member.playerId)) return [];
+    seen.add(member.playerId);
+    const isLocal = member.playerId === player?.id;
+    return [{
+      playerId: member.playerId,
+      nickname: isLocal ? player?.nickname ?? "You" : member.displayName?.trim() || "Guest",
+      isLocal,
+      ready: member.ready,
+    }];
+  });
 }
 
 function readRoomAccessToken(client: RoomClient): string | undefined {
@@ -62,9 +70,16 @@ function readRoomAccessToken(client: RoomClient): string | undefined {
 }
 
 const defaultRealtimeClientFactory: RoomRealtimeClientFactory = () => new RoomRealtimeClient();
+const ACTIVE_VOICE_VOLUME_THRESHOLD = 10;
+const VOICE_VOLUME_MIN = 0;
+const VOICE_VOLUME_MAX = 100;
 
 function rtcTerminalFailure(rtc: MediaUiState["rtc"]) {
   return rtc === "disconnected" || rtc === "kicked" || rtc === "joinFailed";
+}
+
+function mediaReady(mediaState: MediaUiState) {
+  return mediaState.permission === "granted" && mediaState.grant === "ready" && mediaState.rtc === "joined";
 }
 
 function initialRealMedia(): MediaUiState {
@@ -76,7 +91,14 @@ function initialRealMedia(): MediaUiState {
     rtc: "idle",
     recording: "idle",
     report: "waiting",
+    localVoiceActive: false,
+    localVoiceLevel: 0,
   };
+}
+
+function clampVoiceVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return VOICE_VOLUME_MIN;
+  return Math.min(VOICE_VOLUME_MAX, Math.max(VOICE_VOLUME_MIN, volume));
 }
 
 function scoreJobsTerminal(items: ReportItem[]): boolean {
@@ -85,6 +107,52 @@ function scoreJobsTerminal(items: ReportItem[]): boolean {
 
 function scoreJobsReady(items: ReportItem[]): boolean {
   return items.length > 0 && items.every((item) => item.status === "completed");
+}
+
+function visibleReportItems(
+  items: ReportItem[],
+  mediaMode: MediaUiState["mode"],
+  showAllMembers = false,
+): ReportItem[] {
+  if (mediaMode !== "demo" || showAllMembers) return items;
+  const localItem = items[0];
+  return localItem ? [{ ...localItem, playerName: "You" }] : [];
+}
+
+export const REAL_REPORT_POLL_INTERVAL_MS = 1_000;
+const REAL_REPORT_MAX_POLLS = 60;
+export const REPORT_GENERATION_TIMEOUT_MESSAGE = "Report generation timed out. Please try again.";
+
+type ReportSleep = (milliseconds: number) => Promise<void>;
+
+function waitForReportPoll(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function reportReachedTerminalState(report: RoomReport): boolean {
+  return (
+    report.roomStatus === "ended" ||
+    report.roomStatus === "recording_failed" ||
+    scoreJobsTerminal(report.items)
+  );
+}
+
+function reportPollingTimedOut(report: RoomReport): boolean {
+  return report.roomStatus === "processing" && !reportReachedTerminalState(report);
+}
+
+export async function pollRoomReport(
+  client: RoomClient,
+  roomId: string,
+  sleep: ReportSleep = waitForReportPoll,
+): Promise<RoomReport> {
+  let report = await client.getRoomReport(roomId);
+  for (let poll = 1; poll < REAL_REPORT_MAX_POLLS; poll += 1) {
+    if (reportReachedTerminalState(report)) return report;
+    await sleep(REAL_REPORT_POLL_INTERVAL_MS);
+    report = await client.getRoomReport(roomId);
+  }
+  return report;
 }
 
 function clampLatencyMs(startedAt: number): number {
@@ -125,11 +193,22 @@ function trackAnalytics(action: () => void): void {
   }
 }
 
+const GENERIC_ACTION_ERROR = "We couldn't complete that action. Please try again.";
+const CONFLICT_ACTION_ERROR = "This room changed while you were here. Please try again.";
+
+function userFacingApiError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if ((error as { status?: number } | undefined)?.status === 401 || /HTTP 401/.test(message)) {
+    return "Your guest session expired. Please enter as a Demo guest again.";
+  }
+  return /HTTP 409/.test(message) ? CONFLICT_ACTION_ERROR : GENERIC_ACTION_ERROR;
+}
+
 const seats = [
-  { name: "MINT", status: "已就座", tone: "mint" },
-  { name: "AVA", status: "等待中", tone: "warm" },
-  { name: "NOAH", status: "等待中", tone: "dark" },
-  { name: "LUNA", status: "等待中", tone: "soft" },
+  { name: "MINT", status: "Seated", tone: "mint" },
+  { name: "AVA", status: "Waiting", tone: "warm" },
+  { name: "NOAH", status: "Waiting", tone: "dark" },
+  { name: "LUNA", status: "Waiting", tone: "soft" },
 ];
 
 function Button({
@@ -150,7 +229,7 @@ function Button({
       disabled={disabled}
       onPress={onPress}
       style={[styles.button, secondary && styles.secondaryButton, disabled && styles.disabledButton]}
-      testID={`${label === "登录" ? "login" : label === "创建新房间" ? "create-room" : label === "准备好了" ? "ready" : label === "开始房间" ? "start-room" : label === "结束房间" ? "end-room" : label.toLowerCase()}-button`}
+      testID={`${label === "Log in" ? "login" : label === "Create new room" ? "create-room" : label === "Ready" ? "ready" : label === "Start room" ? "start-room" : label === "End room" ? "end-room" : label.toLowerCase()}-button`}
     >
       <Text style={[styles.buttonText, secondary && styles.secondaryButtonText]}>{label}</Text>
     </Pressable>
@@ -175,23 +254,23 @@ export function LegacyAuthScreen({ mode, onLogin, onToggle }: { mode: "login" | 
         <Brand />
         <View style={styles.authHero}>
           <Text style={styles.eyebrow}>SPEAK · CONNECT · GROW</Text>
-          <Text style={styles.display}>{register ? "从今晚开始，开口说英语。" : "和真实的人，练真实的英语。"}</Text>
-          <Text style={styles.muted}>{register ? "建立你的英语房间身份" : "每一次开口，都是向前一步。"}</Text>
+          <Text style={styles.display}>{register ? "Start speaking English tonight." : "Practice real English with real people."}</Text>
+          <Text style={styles.muted}>{register ? "Create your English Room identity" : "Every conversation moves you forward."}</Text>
         </View>
         <View style={styles.authCard}>
-          <Text style={styles.cardTitle}>{register ? "创建账号" : "欢迎回来"}</Text>
-          {register && <Field label="昵称" placeholder="你希望大家怎么称呼你？" />}
-          <Field label="邮箱" placeholder="name@example.com" value={email} onChangeText={setEmail} testID="email-input" />
-          {register && <Field label="验证码" placeholder="输入邮箱验证码" />}
-          <Field label="密码" placeholder="至少 8 位字符" secureTextEntry />
-          {register && <Text style={styles.terms}>注册即代表你同意《用户协议》和《隐私政策》</Text>}
-          <Button label={register ? "创建并开始" : "登录"} onPress={onLogin} />
-          {!register && <Text style={styles.forgot}>忘记密码？</Text>}
-          <View style={styles.divider}><View style={styles.line} /><Text style={styles.dividerText}>或</Text><View style={styles.line} /></View>
-          <View style={styles.socialRow}><Button label=" Apple" onPress={onLogin} secondary /><Button label="微信" onPress={onLogin} secondary /></View>
+          <Text style={styles.cardTitle}>{register ? "Create account" : "Welcome back"}</Text>
+          {register && <Field label="Name" placeholder="What should we call you?" />}
+          <Field label="Email" placeholder="name@example.com" value={email} onChangeText={setEmail} testID="email-input" />
+          {register && <Field label="Verification code" placeholder="Enter your email code" />}
+          <Field label="Password" placeholder="At least 8 characters" secureTextEntry />
+          {register && <Text style={styles.terms}>By signing up, you agree to the Terms and Privacy Policy</Text>}
+          <Button label={register ? "Create and start" : "Log in"} onPress={onLogin} />
+          {!register && <Text style={styles.forgot}>Forgot password?</Text>}
+          <View style={styles.divider}><View style={styles.line} /><Text style={styles.dividerText}>or</Text><View style={styles.line} /></View>
+          <View style={styles.socialRow}><Button label=" Apple" onPress={onLogin} secondary /><Button label="WeChat" onPress={onLogin} secondary /></View>
         </View>
-        <Pressable accessibilityLabel={register ? "前往登录" : "前往注册"} onPress={onToggle}>
-          <Text style={styles.switchText}>{register ? "已有账号？ 登录" : "还没有账号？ 立即注册"}</Text>
+        <Pressable accessibilityLabel={register ? "Go to login" : "Go to sign up"} onPress={onToggle}>
+          <Text style={styles.switchText}>{register ? "Already have an account? Log in" : "Don't have an account? Sign up"}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -204,37 +283,37 @@ function Field(props: { label: string; placeholder: string; value?: string; onCh
 
 export function LegacyLobby({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
   const [code, setCode] = useState("");
-  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>TONIGHT’S ENGLISH SESSION</Text><Text style={styles.display}>今晚想练哪一句？</Text><Text style={styles.muted}>选择一张语言卡，和伙伴进入一场 20 分钟的真实对话。</Text>
-    <View style={styles.topicCard}><Text style={styles.topicBadge}>推荐主题</Text><Text style={styles.topicTitle}>午夜咖啡馆</Text><Text style={styles.topicBody}>用英语聊聊你的城市、旅行和此刻的心情。</Text><View style={styles.topicFooter}><Text style={styles.accentText}>20 MIN · 2–4 人</Text><Text style={styles.topicNumber}>01</Text></View></View>
-    <Button label="创建新房间" onPress={onCreate} />
-    <View style={styles.joinCard}><Text style={styles.cardTitle}>加入朋友的房间</Text><TextInput accessibilityLabel="房间码" autoCapitalize="characters" onChangeText={setCode} placeholder="输入 6 位房间码" placeholderTextColor="#91A29F" style={styles.input} value={code} /><Button label="加入房间" onPress={onJoin} secondary /></View>
+  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>TONIGHT’S ENGLISH SESSION</Text><Text style={styles.display}>What would you like to practice tonight?</Text><Text style={styles.muted}>Choose a language card and join a 20-minute conversation with your friends.</Text>
+    <View style={styles.topicCard}><Text style={styles.topicBadge}>Recommended</Text><Text style={styles.topicTitle}>Midnight Café</Text><Text style={styles.topicBody}>Talk in English about your city, travel, and how you feel right now.</Text><View style={styles.topicFooter}><Text style={styles.accentText}>20 MIN · 2–4 PLAYERS</Text><Text style={styles.topicNumber}>01</Text></View></View>
+    <Button label="Create new room" onPress={onCreate} />
+    <View style={styles.joinCard}><Text style={styles.cardTitle}>Join a friend&apos;s room</Text><TextInput accessibilityLabel="Room code" autoCapitalize="characters" onChangeText={setCode} placeholder="Enter 6-character room code" placeholderTextColor="#91A29F" style={styles.input} value={code} /><Button label="Join room" onPress={onJoin} secondary /></View>
   </ScrollView></SafeAreaView>;
 }
 
 export function LegacyWaiting({ ready, onReady, onStart, onLeave }: { ready: boolean; onReady: () => void; onStart: () => void; onLeave: () => void }) {
   const avatarStyles = [styles.avatar0, styles.avatar1, styles.avatar2, styles.avatar3];
-  return <SafeAreaView style={styles.darkSafe}><ScrollView contentContainerStyle={styles.darkPage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><Pressable accessibilityLabel="离开房间" onPress={onLeave}><Text style={styles.leave}>离开</Text></Pressable></View><Text style={styles.roomCode}>ROOM · MINT 02</Text><Text style={styles.darkDisplay}>等待同伴入座</Text><Text style={styles.darkMuted}>每个人准备好后，就可以开始今天的对话。</Text>
-    <View style={styles.seatGrid}>{seats.map((seat, index) => <View key={seat.name} style={[styles.seat, index === 0 && styles.occupiedSeat]}><View style={[styles.avatar, avatarStyles[index]]}><Text style={styles.avatarText}>{seat.name.slice(0, 1)}</Text></View><Text style={styles.seatName}>{seat.name}</Text><Text style={styles.seatStatus}>{index === 0 && ready ? "已准备" : seat.status}</Text></View>)}</View>
-    <View style={styles.micCheck}><View style={styles.pulseDot} /><View><Text style={styles.micTitle}>麦克风检查正常</Text><Text style={styles.micBody}>你的声音将只在房间内被听见</Text></View></View>
-    <Button label={ready ? "已准备" : "准备好了"} onPress={onReady} secondary={ready} /><Button label="开始房间" disabled={!ready} onPress={onStart} />
+  return <SafeAreaView style={styles.darkSafe}><ScrollView contentContainerStyle={styles.darkPage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><Pressable accessibilityLabel="Leave room" onPress={onLeave}><Text style={styles.leave}>Leave</Text></Pressable></View><Text style={styles.roomCode}>ROOM · MINT 02</Text><Text style={styles.darkDisplay}>Waiting for everyone to take a seat</Text><Text style={styles.darkMuted}>The conversation starts when everyone is ready.</Text>
+    <View style={styles.seatGrid}>{seats.map((seat, index) => <View key={seat.name} style={[styles.seat, index === 0 && styles.occupiedSeat]}><View style={[styles.avatar, avatarStyles[index]]}><Text style={styles.avatarText}>{seat.name.slice(0, 1)}</Text></View><Text style={styles.seatName}>{seat.name}</Text><Text style={styles.seatStatus}>{index === 0 && ready ? "Ready" : seat.status}</Text></View>)}</View>
+    <View style={styles.micCheck}><View style={styles.pulseDot} /><View><Text style={styles.micTitle}>Microphone check passed</Text><Text style={styles.micBody}>Your voice will only be heard in this room</Text></View></View>
+    <Button label={ready ? "Ready" : "Get ready"} onPress={onReady} secondary={ready} /><Button label="Start room" disabled={!ready} onPress={onStart} />
   </ScrollView></SafeAreaView>;
 }
 
 export function LegacyLive({ onEnd }: { onEnd: () => void }) {
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(true);
-  return <SafeAreaView style={styles.darkSafe}><View style={styles.livePage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><View style={styles.network}><View style={styles.networkDot} /><Text style={styles.networkText}>网络良好</Text></View></View><Text style={styles.roomCode}>午夜咖啡馆 · 08:42</Text><Text style={styles.darkDisplay}>正在练习</Text><Text style={styles.darkMuted}>轮到 Mint 分享一个让你微笑的瞬间</Text>
-    <View style={styles.liveStage}><View style={styles.speakerRing}><View style={styles.speakerAvatar}><Text style={styles.speakerInitial}>M</Text></View></View><Text style={styles.liveName}>MINT</Text><Text style={styles.speaking}>正在发言 · 00:42</Text><View style={styles.wave}>{[1,2,3,4,5,6,7].map((bar) => <View key={bar} style={[styles.waveBar, { height: 12 + (bar % 3) * 12 }]} />)}</View></View>
-    <View style={styles.controlBar}><Control label={muted ? "打开麦克风" : "静音"} icon={muted ? "⌁" : "◉"} onPress={() => setMuted(!muted)} /><Control label={speaker ? "扬声器开" : "扬声器关"} icon="◌" onPress={() => setSpeaker(!speaker)} /><Control label="结束房间" icon="×" danger onPress={onEnd} /></View>
+  return <SafeAreaView style={styles.darkSafe}><View style={styles.livePage}><View style={styles.topbar}><Text style={styles.darkBrand}>ENGLISH ROOM</Text><View style={styles.network}><View style={styles.networkDot} /><Text style={styles.networkText}>Good connection</Text></View></View><Text style={styles.roomCode}>Midnight Café · 08:42</Text><Text style={styles.darkDisplay}>In progress</Text><Text style={styles.darkMuted}>It&apos;s Mint&apos;s turn to share a moment that made you smile.</Text>
+    <View style={styles.liveStage}><View style={styles.speakerRing}><View style={styles.speakerAvatar}><Text style={styles.speakerInitial}>M</Text></View></View><Text style={styles.liveName}>MINT</Text><Text style={styles.speaking}>Speaking · 00:42</Text><View style={styles.wave}>{[1,2,3,4,5,6,7].map((bar) => <View key={bar} style={[styles.waveBar, { height: 12 + (bar % 3) * 12 }]} />)}</View></View>
+    <View style={styles.controlBar}><Control label={muted ? "Unmute" : "Mute"} icon={muted ? "⌁" : "◉"} onPress={() => setMuted(!muted)} /><Control label={speaker ? "Speaker on" : "Speaker off"} icon="◌" onPress={() => setSpeaker(!speaker)} /><Control label="End room" icon="×" danger onPress={onEnd} /></View>
   </View></SafeAreaView>;
 }
 
-function Control({ label, icon, danger, onPress }: { label: string; icon: string; danger?: boolean; onPress: () => void }) { return <Pressable accessibilityLabel={label} onPress={onPress} style={styles.control} testID={label === "结束房间" ? "end-room-button" : undefined}><View style={[styles.controlIcon, danger && styles.dangerIcon]}><Text style={styles.controlIconText}>{icon}</Text></View><Text style={styles.controlLabel}>{label}</Text></Pressable>; }
+function Control({ label, icon, danger, onPress }: { label: string; icon: string; danger?: boolean; onPress: () => void }) { return <Pressable accessibilityLabel={label} onPress={onPress} style={styles.control} testID={label === "End room" ? "end-room-button" : undefined}><View style={[styles.controlIcon, danger && styles.dangerIcon]}><Text style={styles.controlIconText}>{icon}</Text></View><Text style={styles.controlLabel}>{label}</Text></Pressable>; }
 
 export function LegacyReport({ onRetry, onDone }: { onRetry: () => void; onDone: () => void }) {
   const [retried, setRetried] = useState(false);
-  const rows = [["MINT", "表达流畅", "88", "done"], ["AVA", "正在分析语音", "处理中", "processing"], ["NOAH", "等待音频上传", "等待中", "waiting"], ["LUNA", retried ? "已重新提交" : "评分暂时失败", retried ? "处理中" : "重试", retried ? "processing" : "failed"]] as const;
-  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>本局口语报告</Text><Text style={styles.muted}>每一次开口，都让表达更自然一点。</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>你的综合评分</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>优秀 · 自信表达者</Text><View style={styles.scorePills}><Text style={styles.scorePill}>流利度 90</Text><Text style={styles.scorePill}>发音 86</Text><Text style={styles.scorePill}>词汇 88</Text></View></View><Text style={styles.sectionTitle}>房间成员报告</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="重试评分" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>重试</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="回到大厅" onPress={onDone} /></ScrollView></SafeAreaView>;
+  const rows = [["MINT", "Fluent expression", "88", "done"], ["AVA", "Analyzing speech", "Processing", "processing"], ["NOAH", "Waiting for audio upload", "Waiting", "waiting"], ["LUNA", retried ? "Submitted again" : "Scoring temporarily failed", retried ? "Processing" : "Retry", retried ? "processing" : "failed"]] as const;
+  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.page}><Brand /><Text style={styles.eyebrow}>SESSION COMPLETE · MINT 02</Text><Text style={styles.display}>Speaking report</Text><Text style={styles.muted}>Every conversation helps you express yourself more naturally.</Text><View style={styles.scoreHero}><Text style={styles.scoreLabel}>Your overall score</Text><Text style={styles.score}>88</Text><Text style={styles.scoreCaption}>Great · Confident speaker</Text><View style={styles.scorePills}><Text style={styles.scorePill}>Fluency 90</Text><Text style={styles.scorePill}>Pronunciation 86</Text><Text style={styles.scorePill}>Vocabulary 88</Text></View></View><Text style={styles.sectionTitle}>Room member reports</Text>{rows.map(([name, body, status, tone]) => <View key={name} style={styles.reportRow}><View style={styles.reportAvatar}><Text style={styles.reportAvatarText}>{name[0]}</Text></View><View style={styles.reportInfo}><Text style={styles.reportName}>{name}</Text><Text style={styles.reportBody}>{body}</Text></View>{tone === "failed" ? <Pressable accessibilityLabel="Retry scoring" onPress={() => { setRetried(true); onRetry(); }}><Text style={styles.retry}>Retry</Text></Pressable> : <Text style={[styles.reportStatus, tone === "done" && styles.successStatus]}>{status}</Text>}</View>)}<Button label="Back to lobby" onPress={onDone} /></ScrollView></SafeAreaView>;
 }
 
 export function RoomApp({
@@ -265,7 +344,11 @@ export function RoomApp({
       analyticsEventsFactory(client, appSessionId, state.player?.id),
     [injectedAnalyticsEvents, analyticsEventsFactory, client, appSessionId, state.player?.id],
   );
-  const mediaMode = resolveMediaMode(process.env, Platform.OS);
+  const mediaMode = resolveAppMediaMode(
+    { ...process.env, EXPO_PUBLIC_MEDIA_MODE: process.env.EXPO_PUBLIC_MEDIA_MODE },
+    Platform.OS,
+    __DEV__,
+  );
   const rtcRef = useRef<RtcClient | null>(null);
   const [liveMedia, setLiveMedia] = useState<MediaUiState>(
     injectedMediaState ?? (mediaMode === "real" ? initialRealMedia() : demoMediaUiState),
@@ -280,6 +363,7 @@ export function RoomApp({
   const [reportError, setReportError] = useState<string>();
   const playerRef = useRef(state.player);
   const realtimeRef = useRef<ReturnType<RoomRealtimeClientFactory> | null>(null);
+  const reportLoadStartedRef = useRef<string | undefined>(undefined);
   const maybeEmitAppOpened = useCallback(() => {
     if (appOpenedSentRef.current || !canSendAuthenticatedAnalytics(client)) {
       return;
@@ -307,6 +391,11 @@ export function RoomApp({
         type: "roomMembersUpdated",
         members: mapRoomMembers(update.room.members, playerRef.current),
       });
+      if (update.room.status === "live") {
+        dispatch({ type: "roomStarted" });
+      } else if (update.room.status === "ended" || update.room.status === "recording_failed") {
+        dispatch({ type: "roomEnded" });
+      }
     });
     const unsubscribeProtocolErrors = realtime.subscribeProtocolErrors(() => {
       // Protocol / transport errors stay inside RoomRealtimeClient; do not block REST or fake TRTC state.
@@ -322,6 +411,25 @@ export function RoomApp({
       }
     };
   }, [roomId, client, realtimeClientFactory]);
+  useEffect(() => {
+    if (state.screen !== "report" || !roomId || reportLoadStartedRef.current === roomId) return;
+    reportLoadStartedRef.current = roomId;
+    let active = true;
+    void client
+      .getRoomReport(roomId)
+      .then((report) => {
+        if (!active) return;
+        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        setReportItems(items);
+        setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+      })
+      .catch(() => {
+        if (active) setReportError("Could not load the report. Please try again.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, mediaState.mode, roomId, state.screen]);
   useEffect(() => {
     if (injectedMediaState || mediaMode !== "real") return;
     let active = true;
@@ -341,7 +449,12 @@ export function RoomApp({
             const rtc = mapRtcToMedia(next.connection);
             setMuted(next.muted);
             setSpeakerOn(next.speakerOn);
-            setLiveMedia((current) => ({ ...current, rtc }));
+            setLiveMedia((current) => ({
+              ...current,
+              localVoiceActive: next.muted || rtc !== "joined" ? false : current.localVoiceActive,
+              localVoiceLevel: next.muted || rtc !== "joined" ? VOICE_VOLUME_MIN : current.localVoiceLevel,
+              rtc,
+            }));
             if (rtcTerminalFailure(rtc)) {
               setRemoteSeats([]);
             }
@@ -364,8 +477,19 @@ export function RoomApp({
           },
           onUserVoiceVolume: (userId, volume) => {
             setRemoteSeats((current) =>
-              current.map((seat) => (seat.userId === userId ? { ...seat, speaking: volume > 10 } : seat)),
+              current.map((seat) => (seat.userId === userId ? { ...seat, speaking: volume > ACTIVE_VOICE_VOLUME_THRESHOLD } : seat)),
             );
+          },
+          onLocalVoiceVolume: (volume) => {
+            const level = clampVoiceVolume(volume);
+            setLiveMedia((current) => {
+              const connected = current.permission === "granted" && current.rtc === "joined";
+              return {
+                ...current,
+                localVoiceActive: level > ACTIVE_VOICE_VOLUME_THRESHOLD && connected,
+                localVoiceLevel: connected ? level : VOICE_VOLUME_MIN,
+              };
+            });
           },
         });
       } catch {
@@ -417,20 +541,20 @@ export function RoomApp({
     setLiveMedia((current) => ({ ...current, permission: "requesting" }));
     return true;
   };
-  const prepareRealMedia = async (roomId: string) => {
+  const prepareRealMedia = async (roomId: string): Promise<boolean> => {
     // Media failures must surface inside waiting/live via MediaUiState, never block
     // roomJoined or rely on a top-of-screen "API:" status-bar error.
-    if (mediaMode !== "real" || injectedMediaState) return;
+    if (mediaMode !== "real" || injectedMediaState) return false;
     const rtc = rtcRef.current;
     if (!rtc) {
       setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "joinFailed" }));
-      return;
+      return false;
     }
     const permitted = await ensureMicPermission();
     if (!permitted) {
       // permission already set to denied; keep rtc/grant idle so WaitingMediaNotice shows.
       setLiveMedia((current) => ({ ...current, grant: "idle", rtc: "idle" }));
-      return;
+      return false;
     }
     setLiveMedia((current) => ({ ...current, grant: "loading", rtc: "joining" }));
     try {
@@ -444,11 +568,15 @@ export function RoomApp({
           grant: "ready",
           rtc: "joined",
         }));
+        return true;
       } catch {
         setLiveMedia((current) => ({ ...current, rtc: "joinFailed" }));
+        await rtc.leave().catch(() => undefined);
+        return false;
       }
     } catch {
       setLiveMedia((current) => ({ ...current, grant: "failed", rtc: "idle" }));
+      return false;
     }
   };
   const leaveSession = () => {
@@ -495,7 +623,12 @@ export function RoomApp({
     }
     dispatch({
       type: "roomJoined",
-      room: { id: room.id, code: room.code, title: room.title },
+      room: {
+        id: room.id,
+        code: room.code,
+        title: room.title,
+        ownerPlayerId: room.ownerPlayerId,
+      },
       members: mapRoomMembers(joinedMembers, player),
     });
     await prepareRealMedia(room.id);
@@ -503,12 +636,17 @@ export function RoomApp({
   const reconnectMedia = async () => {
     if (!roomId || busy || mediaMode !== "real" || injectedMediaState) return;
     setRemoteSeats([]);
+    const rtc = rtcRef.current;
+    if (rtc) {
+      await rtc.leave().catch(() => undefined);
+    }
     await prepareRealMedia(roomId);
   };
   const fail = (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    setApiError(message);
+    setApiError(userFacingApiError(error));
   };
+  const isRoomOwner =
+    !state.room?.ownerPlayerId || state.room.ownerPlayerId === state.player?.id;
   const auth = (nickname: string) => {
     if (busy) return;
     setApiError(undefined);
@@ -541,7 +679,7 @@ export function RoomApp({
     setBusy(true);
     const startedAt = Date.now();
     void client
-      .createRoom({ title: "雾港疑云" })
+      .createRoom({ title: "Harbor Mystery" })
       .then(async (room) => {
         const playerId = playerRef.current?.id;
         if (playerId) {
@@ -564,7 +702,11 @@ export function RoomApp({
   const joinByCode = (code: string) => {
     const playerId = state.player?.id;
     if (!playerId) {
-      setApiError("请先以访客身份进入");
+        setApiError("Please enter as a guest first.");
+      return;
+    }
+    if (typeof client.getAccessToken === "function" && !readRoomAccessToken(client)) {
+      setApiError("Your guest session expired. Please enter as a Demo guest again.");
       return;
     }
     if (busy) return;
@@ -581,9 +723,13 @@ export function RoomApp({
     setApiError(undefined);
     setBusy(true);
     const nextReady = !state.ready;
-    void client
-      .setReady(roomId, nextReady)
-      .then((room) => {
+    void (async () => {
+      if (nextReady && mediaMode === "real" && !mediaReady(mediaState)) {
+        if (injectedMediaState || !(await prepareRealMedia(roomId))) {
+          return;
+        }
+      }
+      const room = await client.setReady(roomId, nextReady);
         const playerId = playerRef.current?.id;
         if (playerId) {
           trackAnalytics(() =>
@@ -601,12 +747,12 @@ export function RoomApp({
           ready: nextReady,
           members: mapRoomMembers(room.members, playerRef.current),
         });
-      })
+    })()
       .catch(fail)
       .finally(() => setBusy(false));
   };
   const start = () => {
-    if (!roomId || busy) return;
+    if (!roomId || busy || !isRoomOwner) return;
     setApiError(undefined);
     setBusy(true);
     const startedAt = Date.now();
@@ -630,7 +776,7 @@ export function RoomApp({
       .finally(() => setBusy(false));
   };
   const end = () => {
-    if (!roomId || busy) return;
+    if (!roomId || busy || !isRoomOwner) return;
     setApiError(undefined);
     setReportError(undefined);
     setBusy(true);
@@ -650,23 +796,7 @@ export function RoomApp({
         } else {
           setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
         }
-        const report = await client.getRoomReport(roomId);
-        setReportItems(report.items);
-        if (ended.status === "recording_failed") {
-          // already failed above
-        } else if (scoreJobsReady(report.items)) {
-          nextRecording = "ready";
-          nextReport = "ready";
-          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
-        } else if (scoreJobsTerminal(report.items)) {
-          nextRecording = "ready";
-          nextReport = "failed";
-          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
-        } else {
-          nextRecording = "processing";
-          nextReport = "processing";
-          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
-        }
+        setReportItems([]);
         const playerId = playerRef.current?.id;
         if (playerId) {
           recordingSequenceRef.current += 1;
@@ -679,6 +809,36 @@ export function RoomApp({
               member_count: ended.members.length,
             }),
           );
+        }
+        // Switch to the report immediately. The recording callback and score job are asynchronous;
+        // polling continues in the background so a slow evaluator cannot make End feel stuck.
+        reportLoadStartedRef.current = roomId;
+        dispatch({ type: "roomEnded" });
+        const report = await pollRoomReport(client, roomId);
+        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        setReportItems(items);
+        if (reportPollingTimedOut(report)) {
+          // The recording artifact is still considered available; only report generation timed out.
+          nextRecording = "ready";
+          nextReport = "failed";
+          setReportError(REPORT_GENERATION_TIMEOUT_MESSAGE);
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
+        } else if (ended.status === "recording_failed") {
+          // already failed above
+        } else if (scoreJobsReady(items)) {
+          nextRecording = "ready";
+          nextReport = "ready";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
+        } else if (scoreJobsTerminal(items)) {
+          nextRecording = "ready";
+          nextReport = "failed";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
+        } else {
+          nextRecording = "processing";
+          nextReport = "processing";
+          setLiveMedia((current) => ({ ...current, recording: nextRecording, report: nextReport }));
+        }
+        if (playerId) {
           trackAnalytics(() =>
             analyticsEvents.recordingStatusChanged({
               room_id: roomId,
@@ -698,14 +858,37 @@ export function RoomApp({
             }),
           );
         }
-        dispatch({ type: "roomEnded" });
       } catch (error) {
         fail(error);
-        setReportError("报告加载失败，请重试");
+        setReportError("Could not load the report. Please try again.");
       } finally {
         setBusy(false);
       }
     })();
+  };
+  const refreshReport = () => {
+    if (!roomId || busy) return;
+    setBusy(true);
+    setReportError(undefined);
+    void pollRoomReport(client, roomId)
+      .then((report) => {
+        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        setReportItems(items);
+        if (reportPollingTimedOut(report)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+          setReportError(REPORT_GENERATION_TIMEOUT_MESSAGE);
+          return;
+        }
+        if (scoreJobsReady(items)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "ready" }));
+        } else if (scoreJobsTerminal(items)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+        } else {
+          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+        }
+      })
+      .catch(() => setReportError("Could not load the report. Please try again."))
+      .finally(() => setBusy(false));
   };
   const retry = (item: ReportItem) => {
     const startedAt = Date.now();
@@ -731,7 +914,7 @@ export function RoomApp({
           items.map((current) => (current.scoreJobId === next.scoreJobId ? next : current)),
         );
       })
-      .catch(() => setReportError("报告加载失败，请重试"));
+      .catch(() => setReportError("Could not load the report. Please try again."));
   };
   const pages: Record<Screen, React.ReactNode> = {
     login: <VisualAuthScreen busy={busy} mode="login" onLogin={auth} onToggle={() => dispatch({ type: "showRegister" })} />,
@@ -746,13 +929,17 @@ export function RoomApp({
         roomCode={state.room?.code}
         onLeave={leaveSession}
         onReady={ready}
+        onReconnectMedia={() => {
+          void reconnectMedia();
+        }}
         onStart={start}
+        isOwner={isRoomOwner}
       />
     ),
     live: (
       <LiveScreen
         busy={busy}
-        localName={state.player?.nickname ?? "我"}
+        localName={state.player?.nickname ?? "Me"}
         mediaState={mediaState}
         muted={muted}
         remotes={remoteSeats}
@@ -767,14 +954,28 @@ export function RoomApp({
           void reconnectMedia();
         }}
         onEnd={end}
+        canEnd={isRoomOwner}
+        members={state.members}
       />
     ),
-    report: <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={leaveSession} onRetry={retry} />,
+    report:
+      mediaState.mode === "real" && mediaState.report === "processing" ? (
+        <ReportLoadingScreen onDone={leaveSession} />
+      ) : (
+        <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={leaveSession} onRefresh={refreshReport} onRetry={retry} />
+      ),
   };
-  return <>{apiError ? <Text accessibilityLabel="API 错误">API: {apiError}</Text> : null}{pages[state.screen]}</>;
+  const apiErrorPlacement = state.screen === "waiting" ? styles.apiErrorWaiting : state.screen === "live" ? styles.apiErrorLive : state.screen === "lobby" ? styles.apiErrorLobby : undefined;
+  return <View style={styles.appRoot}>{pages[state.screen]}{apiError ? <View accessibilityLabel="API error" style={[styles.apiError, apiErrorPlacement]}><Text style={styles.apiErrorText}>{apiError}</Text></View> : null}</View>;
 }
 
 const styles = StyleSheet.create({
+  appRoot: { flex: 1 },
+  apiError: { backgroundColor: "#FFF7E6", borderColor: "#E5C27A", borderRadius: 12, borderWidth: 1, left: 16, paddingHorizontal: 14, paddingVertical: 9, position: "absolute", right: 16, zIndex: 10 },
+  apiErrorLobby: { bottom: 78 },
+  apiErrorLive: { bottom: 150 },
+  apiErrorText: { color: "#684300", fontSize: 12, fontWeight: "700", textAlign: "center" },
+  apiErrorWaiting: { bottom: 96 },
   safe: { flex: 1, backgroundColor: colors.background }, darkSafe: { flex: 1, backgroundColor: colors.ink },
   page: { padding: spacing.page, paddingBottom: spacing.xxl, gap: spacing.md }, darkPage: { padding: spacing.page, paddingBottom: spacing.xxl, gap: spacing.md },
   authContent: { flexGrow: 1, padding: spacing.page, paddingTop: spacing.xl, gap: spacing.lg }, brand: { alignItems: "center", flexDirection: "row", gap: 8 }, brandMark: { alignItems: "center", backgroundColor: colors.ink, borderRadius: 9, height: 30, justifyContent: "center", width: 30 }, brandMarkText: { color: colors.accentLight, fontSize: 10, fontWeight: "900" }, brandText: { color: colors.ink, fontSize: 12, fontWeight: "800", letterSpacing: 1.4 },

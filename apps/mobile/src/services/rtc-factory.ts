@@ -51,7 +51,7 @@ export function createRtcClient(mode: MediaRuntimeMode = resolveMediaMode(proces
   const mod = loadTrtcModule();
   if (!mod || !isTrtcNativeAvailable()) {
     throw new Error(
-      "真实语音模式要求原生 TRTC 模块（trtc-react-native development build）；当前环境不可用，已 fail closed",
+      "Real voice mode requires the native TRTC module (trtc-react-native development build); unavailable in this environment, failing closed",
     );
   }
   const shared =
@@ -62,7 +62,7 @@ export function createRtcClient(mode: MediaRuntimeMode = resolveMediaMode(proces
         : undefined;
   const defs = mod.TRTCCloudDef;
   if (!shared || !defs) {
-    throw new Error("真实语音模式 TRTC SDK 导出不完整，已 fail closed");
+    throw new Error("Real voice mode TRTC SDK exports are incomplete; failing closed");
   }
   const cloud = shared();
   const Params = mod.TRTCParams;

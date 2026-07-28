@@ -63,12 +63,12 @@ describe("RoomApp room realtime", () => {
       <RoomApp client={client} mediaState={mediaState} realtimeClientFactory={factory} />,
     );
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
     });
-    await view.findByText("等待同伴入座");
+    await view.findByText("Waiting for everyone to take a seat");
     return view;
   };
 
@@ -95,19 +95,22 @@ describe("RoomApp room realtime", () => {
         room: {
           id: connect.mock.calls[0]![0]!.roomId,
           code: "4827",
-          title: "雾港疑云",
+          title: "Harbor Mystery",
           status: "waiting",
           version: 2,
           members: [
-            { playerId: "guest-1", ready: false },
-            { playerId: "guest-2", ready: true },
+            { playerId: "guest-1", displayName: "Avery", ready: false },
+            { playerId: "guest-2", displayName: "Rowan", ready: true },
           ],
         },
       });
     });
 
-    expect(view.getAllByText("guest-2").length).toBeGreaterThan(0);
-    expect(view.getAllByText("已准备").length).toBeGreaterThan(0);
+    expect(view.getByText("You")).toBeTruthy();
+    expect(view.getByText("Guest")).toBeTruthy();
+    expect(view.getByText("Rowan")).toBeTruthy();
+    expect(view.queryByText("guest-2")).toBeNull();
+    expect(view.getAllByText("Ready").length).toBeGreaterThan(0);
   });
 
   it("closes realtime on leave", async () => {
@@ -115,9 +118,9 @@ describe("RoomApp room realtime", () => {
     const view = await enterWaiting(new RealtimeCapableRoomClient(), factory);
 
     await act(async () => {
-      fireEvent.press(view.getByLabelText("离开房间"));
+      fireEvent.press(view.getByLabelText("Leave room"));
     });
-    expect(await view.findByText("今晚想练哪一句？")).toBeTruthy();
+    expect(await view.findByText("What would you like to practice tonight?")).toBeTruthy();
     expect(close).toHaveBeenCalled();
   });
 
@@ -141,11 +144,32 @@ describe("RoomApp room realtime", () => {
     );
 
     await act(async () => {
-      emitProtocolError("WebSocket 连接错误");
+      emitProtocolError("WebSocket connection error");
     });
 
-    expect(view.getByText("等待同伴入座")).toBeTruthy();
-    expect(view.queryByLabelText("API 错误")).toBeNull();
-    expect(view.getByLabelText("真实语音模式")).toBeTruthy();
+    expect(view.getByText("Waiting for everyone to take a seat")).toBeTruthy();
+    expect(view.queryByLabelText("API error")).toBeNull();
+    expect(view.queryByLabelText("Real voice mode")).toBeNull();
+    expect(view.getByText("TRTC: Waiting for connection")).toBeTruthy();
+  });
+
+  it("does not mark a real room ready before TRTC has joined", async () => {
+    const previousMode = process.env.EXPO_PUBLIC_MEDIA_MODE;
+    process.env.EXPO_PUBLIC_MEDIA_MODE = "real";
+    const { factory } = createControllableRealtimeFactory();
+    const client = new RealtimeCapableRoomClient();
+    const setReady = jest.spyOn(client, "setReady");
+    try {
+      const view = await enterWaiting(client, factory, { ...realWaitingMedia, rtc: "idle" });
+
+      await act(async () => {
+        fireEvent.press(view.getByTestId("ready-button"));
+      });
+
+      expect(setReady).not.toHaveBeenCalled();
+      expect(view.getByText("Waiting for microphone access and room connection.")).toBeTruthy();
+    } finally {
+      process.env.EXPO_PUBLIC_MEDIA_MODE = previousMode;
+    }
   });
 });
