@@ -30,18 +30,18 @@ const apiStatusContent: Record<
   }
 > = {
   checking: {
-    status: "检查中",
-    description: "正在连接 FastAPI 健康检查。",
+    status: "Checking",
+    description: "Connecting to the FastAPI health check.",
     tone: "neutral",
   },
   online: {
-    status: "服务在线",
-    description: "FastAPI 已响应，可以继续构建房间控制面。",
+    status: "Service online",
+    description: "FastAPI responded successfully; the room control layer is ready.",
     tone: "success",
   },
   offline: {
-    status: "服务离线",
-    description: "客户端仍可运行，请启动 FastAPI 后重试。",
+    status: "Service offline",
+    description: "The client can still run. Start FastAPI and try again.",
     tone: "warning",
   },
 };
@@ -84,34 +84,34 @@ export function DemoScreen({
           <Text style={styles.eyebrowText}>FOUNDATION READY</Text>
         </View>
 
-        <Text style={styles.title}>English Room Demo</Text>
-        <Text style={styles.subtitle}>多人英语实时语音房间与局后评分</Text>
+        <Text style={styles.title}>English Room Foundation</Text>
+        <Text style={styles.subtitle}>Multiplayer English voice rooms and post-session scoring</Text>
 
         <View style={styles.summary}>
-          <Text style={styles.summaryLabel}>当前里程碑</Text>
-          <Text style={styles.summaryTitle}>基础框架与运行环境</Text>
+          <Text style={styles.summaryLabel}>Current milestone</Text>
+          <Text style={styles.summaryTitle}>Foundation and runtime</Text>
           <Text style={styles.summaryBody}>
-            先验证客户端、控制面和原生运行链路，再接入多人 TRTC 音频与异步评分。
+            Validate the client, control layer, and native runtime before connecting multiplayer TRTC audio and asynchronous scoring.
           </Text>
         </View>
 
         <View style={styles.cards}>
           <DemoStatusCard
             title="Expo Development Build"
-            status="已启用"
-            description="支持后续接入 TRTC 自定义原生模块。"
+            status="Enabled"
+            description="Ready for the custom TRTC native module."
             tone="success"
           />
           <DemoStatusCard
-            title="FastAPI 控制面"
+            title="FastAPI control layer"
             status={apiContent.status}
             description={apiContent.description}
             tone={apiContent.tone}
           />
           <DemoStatusCard
-            title="TRTC 实时语音"
-            status="下一阶段接入"
-            description="音频由客户端直连腾讯云，不经过业务后端。"
+            title="TRTC voice"
+            status="Next phase"
+            description="Audio connects directly from the client to Tencent Cloud, without passing through the business backend."
             tone="neutral"
           />
         </View>

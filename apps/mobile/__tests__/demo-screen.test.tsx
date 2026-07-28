@@ -11,11 +11,11 @@ describe("DemoScreen", () => {
 
     const view = await render(<DemoScreen loadHealth={loadHealth} />);
 
-    view.getByText("English Room Demo");
+    view.getByText("English Room Foundation");
     view.getByText("Expo Development Build");
-    view.getByText("TRTC 实时语音");
-    view.getByText("下一阶段接入");
-    await view.findByText("服务在线");
+    view.getByText("TRTC voice");
+    view.getByText("Next phase");
+    await view.findByText("Service online");
     expect(loadHealth).toHaveBeenCalledTimes(1);
   });
 
@@ -24,7 +24,7 @@ describe("DemoScreen", () => {
 
     const view = await render(<DemoScreen loadHealth={loadHealth} />);
 
-    await view.findByText("服务离线");
-    view.getByText("客户端仍可运行，请启动 FastAPI 后重试。");
+    await view.findByText("Service offline");
+    view.getByText("The client can still run. Start FastAPI and try again.");
   });
 });

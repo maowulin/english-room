@@ -2,6 +2,7 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import { View } from "react-native";
 
 import {
+  demoMediaUiState,
   LiveScreen,
   LobbyScreen,
   ReportScreen,
@@ -11,7 +12,7 @@ import {
 import type { ReportItem } from "@/services/room-client";
 
 /**
- * Dev/QA visual harness for 390×844 media-state screenshots (Web 注入态布局证据).
+ * Dev/QA visual harness for 390×844 media-state screenshots (evidence for injected web states).
  * Fail-closed: only available in __DEV__ or when EXPO_PUBLIC_ENABLE_QA_MEDIA=1.
  * Not part of the player product path; not native/real TRTC runtime evidence.
  */
@@ -21,6 +22,7 @@ function isQaMediaEnabled(): boolean {
 }
 
 const presets: Record<string, MediaUiState> = {
+  "demo-ready": demoMediaUiState,
   "real-lobby": {
     mode: "real",
     network: "good",
@@ -162,6 +164,41 @@ const sampleReports: ReportItem[] = [
   },
 ];
 
+const sampleDemoReports: ReportItem[] = [
+  {
+    fluency: 88,
+    playerName: "Liam",
+    pronunciation: 91,
+    score: 90,
+    scoreJobId: "demo-score-1",
+    status: "completed",
+  },
+  {
+    fluency: 86,
+    playerName: "Mia",
+    pronunciation: 89,
+    score: 88,
+    scoreJobId: "demo-score-2",
+    status: "completed",
+  },
+  {
+    fluency: 82,
+    playerName: "Alex",
+    pronunciation: 85,
+    score: 84,
+    scoreJobId: "demo-score-3",
+    status: "completed",
+  },
+  {
+    fluency: 80,
+    playerName: "Suki",
+    pronunciation: 83,
+    score: 82,
+    scoreJobId: "demo-score-4",
+    status: "completed",
+  },
+];
+
 export default function QaMediaScreen() {
   const params = useLocalSearchParams<{ screen?: string; preset?: string }>();
   const screen = String(params.screen ?? "lobby");
@@ -192,7 +229,7 @@ export default function QaMediaScreen() {
   if (screen === "report") {
     return (
       <ReportScreen
-        items={sampleReports}
+        items={mediaState.mode === "demo" ? sampleDemoReports : sampleReports}
         mediaState={mediaState}
         onDone={noop}
         onRetry={noop}

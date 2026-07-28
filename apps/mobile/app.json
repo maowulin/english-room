@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "English Room Demo",
+    "name": "English Room",
     "slug": "english-room-demo",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -12,10 +12,12 @@
       "bundleIdentifier": "com.maowulin.englishroomdemo",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "English Room 需要麦克风权限以进行真实语音练习"
-      }
+      },
+      "appleTeamId": "N6HVZ24ZK9"
     },
     "android": {
       "package": "com.maowulin.englishroomdemo",
+      "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
