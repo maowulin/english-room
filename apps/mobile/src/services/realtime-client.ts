@@ -34,6 +34,10 @@ export type RealtimeRoomView = {
   status: "waiting" | "live" | "ended" | "recording_failed";
   version: number;
   ownerPlayerId?: string;
+  turnIndex: number;
+  completedTurnCount: number;
+  currentSpeakerPlayerId?: string;
+  allTurnsCompleted: boolean;
   members: RealtimeRoomMember[];
 };
 
@@ -52,6 +56,10 @@ type BackendRoomPayload = {
   status: string;
   version: number;
   owner_player_id?: string | null;
+  turn_index?: number;
+  completed_turn_count?: number;
+  current_speaker_player_id?: string | null;
+  all_turns_completed?: boolean;
   members: { player_id: string; display_name?: string; ready: boolean }[];
 };
 
@@ -105,6 +113,10 @@ function mapRoomPayload(snapshot: BackendRoomPayload): RealtimeRoomView {
     status: mapBackendRoomStatus(snapshot.status),
     version: snapshot.version,
     ownerPlayerId: snapshot.owner_player_id ?? undefined,
+    turnIndex: snapshot.turn_index ?? 0,
+    completedTurnCount: snapshot.completed_turn_count ?? 0,
+    currentSpeakerPlayerId: snapshot.current_speaker_player_id ?? undefined,
+    allTurnsCompleted: snapshot.all_turns_completed ?? false,
     members: snapshot.members.map((member) => ({
       playerId: member.player_id,
       displayName: member.display_name,

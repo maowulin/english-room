@@ -120,6 +120,34 @@ describe("HttpRoomClient", () => {
     expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/v1/rooms/r1")).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("posts a versioned turn completion and maps the next speaker", async () => {
+    const fetcher = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/v1/guest-sessions")) {
+        return { ok: true, json: async () => ({ player_id: "p1", access_token: "token", profile: { display_name: "Mint" } }) } as Response;
+      }
+      if (path.endsWith("/v1/rooms/r1") && (!init?.method || init.method === "GET")) {
+        return { ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "live", version: 4, current_speaker_player_id: "p1", completed_turn_count: 0, members: [{ player_id: "p1", ready: true }, { player_id: "p2", ready: true }] }) } as Response;
+      }
+      if (path.endsWith("/v1/rooms/r1/turn/complete")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ room_version: 4 });
+        return { ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "live", version: 5, current_speaker_player_id: "p2", completed_turn_count: 1, members: [{ player_id: "p1", ready: true }, { player_id: "p2", ready: true }] }) } as Response;
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    const client = new HttpRoomClient({ baseUrl: "http://api", fetcher: fetcher as typeof fetch });
+    await client.createGuestSession({ nickname: "Mint" });
+
+    await expect(client.completeTurn("r1")).resolves.toMatchObject({
+      currentSpeakerPlayerId: "p2",
+      completedTurnCount: 1,
+    });
+    expect(fetcher).toHaveBeenLastCalledWith(
+      "http://api/v1/rooms/r1/turn/complete",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("rejects unknown backend room status instead of falling back to waiting", async () => {
     const fetcher = jest.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ player_id: "p1", access_token: "token", profile: { display_name: "Mint" } }) } as Response)

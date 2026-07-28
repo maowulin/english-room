@@ -12,6 +12,10 @@ export type Room = {
   version?: number;
   ownerPlayerId?: string;
   members: RoomMember[];
+  turnIndex?: number;
+  completedTurnCount?: number;
+  currentSpeakerPlayerId?: string;
+  allTurnsCompleted?: boolean;
 };
 export type ReportItem = {
   playerName: string;
@@ -37,6 +41,7 @@ export const roomApiPaths = {
   room: "/v1/rooms/{id}",
   ready: "/v1/rooms/{id}/members/me/ready",
   start: "/v1/rooms/{id}/start",
+  completeTurn: "/v1/rooms/{id}/turn/complete",
   end: "/v1/rooms/{id}/end",
   report: "/v1/rooms/{id}/report",
   retry: "/v1/score-jobs/{id}/retry",
@@ -54,6 +59,7 @@ export interface RoomClient {
   getRoom(roomId: string): Promise<Room>;
   setReady(roomId: string, ready: boolean): Promise<Room>;
   startRoom(roomId: string): Promise<Room>;
+  completeTurn(roomId: string): Promise<Room>;
   endRoom(roomId: string): Promise<Room>;
   getRoomReport(roomId: string): Promise<RoomReport>;
   retryScoreJob(scoreJobId: string): Promise<ReportItem>;
@@ -65,11 +71,13 @@ export class FakeRoomClient implements RoomClient {
   private rooms = new Map<string, Room>();
   private reports = new Map<string, RoomReport>();
   private playerNames = new Map<string, string>();
+  private activePlayerId?: string;
   private sequence = 1;
 
   async createGuestSession(input: { nickname: string }): Promise<GuestSession> {
     const playerId = `guest-${this.sequence++}`;
     this.playerNames.set(playerId, input.nickname);
+    this.activePlayerId = playerId;
     return { playerId, nickname: input.nickname };
   }
 
@@ -82,7 +90,11 @@ export class FakeRoomClient implements RoomClient {
       code: `MINT${String(this.sequence).padStart(2, "0")}`,
       title: input.title,
       status: "waiting",
+      ownerPlayerId: this.activePlayerId,
       members: [],
+      turnIndex: 0,
+      completedTurnCount: 0,
+      allTurnsCompleted: false,
     };
     this.rooms.set(id, room);
     return room;
@@ -117,11 +129,33 @@ export class FakeRoomClient implements RoomClient {
   async startRoom(roomId: string): Promise<Room> {
     const room = await this.getRoom(roomId);
     room.status = "live";
+    room.turnIndex = 0;
+    room.completedTurnCount = 0;
+    room.currentSpeakerPlayerId = room.members[0]?.playerId;
+    room.allTurnsCompleted = room.members.length === 0;
+    return room;
+  }
+
+  async completeTurn(roomId: string): Promise<Room> {
+    const room = await this.getRoom(roomId);
+    const currentIndex = room.members.findIndex(
+      (member) => member.playerId === room.currentSpeakerPlayerId,
+    );
+    if (currentIndex < 0) throw new Error("It is not this player's turn");
+    const completedTurnCount = (room.completedTurnCount ?? 0) + 1;
+    const nextMember = room.members[currentIndex + 1];
+    room.turnIndex = currentIndex + 1;
+    room.completedTurnCount = completedTurnCount;
+    room.currentSpeakerPlayerId = nextMember?.playerId;
+    room.allTurnsCompleted = completedTurnCount >= room.members.length;
     return room;
   }
 
   async endRoom(roomId: string): Promise<Room> {
     const room = await this.getRoom(roomId);
+    if (room.members.length > 0 && !room.allTurnsCompleted) {
+      throw new Error("All members must complete their turn before ending");
+    }
     room.status = "ended";
     this.reports.set(roomId, {
       roomId,
@@ -180,6 +214,10 @@ type RoomSnapshot = {
   status: string;
   version: number;
   owner_player_id?: string | null;
+  turn_index?: number;
+  completed_turn_count?: number;
+  current_speaker_player_id?: string | null;
+  all_turns_completed?: boolean;
   members: { player_id: string; display_name?: string; ready: boolean }[];
 };
 
@@ -257,6 +295,7 @@ export class HttpRoomClient implements RoomClient {
   async getRoom(roomId: string): Promise<Room> { return this.mapRoom(await this.request(`/v1/rooms/${roomId}`, { method: "GET" }, false) as RoomSnapshot); }
   async setReady(roomId: string, _ready: boolean): Promise<Room> { return this.versioned(roomId, "PUT", "/members/me/ready"); }
   async startRoom(roomId: string): Promise<Room> { return this.versioned(roomId, "POST", "/start"); }
+  async completeTurn(roomId: string): Promise<Room> { return this.versioned(roomId, "POST", "/turn/complete"); }
   async endRoom(roomId: string): Promise<Room> { return this.versioned(roomId, "POST", "/end"); }
   async getRoomReport(roomId: string): Promise<RoomReport> {
     const payload = await this.request(`/v1/rooms/${roomId}/report`, { method: "GET" }) as { room: RoomSnapshot; score_jobs: { score_job_id: string; player_id: string; display_name?: string; status: ReportItem["status"]; scores?: Record<string, number>; failure_reason?: string | null }[] };
@@ -325,6 +364,10 @@ export class HttpRoomClient implements RoomClient {
       status: mapBackendRoomStatus(snapshot.status),
       version: snapshot.version,
       ownerPlayerId: snapshot.owner_player_id ?? undefined,
+      turnIndex: snapshot.turn_index ?? 0,
+      completedTurnCount: snapshot.completed_turn_count ?? 0,
+      currentSpeakerPlayerId: snapshot.current_speaker_player_id ?? undefined,
+      allTurnsCompleted: snapshot.all_turns_completed ?? false,
       members: snapshot.members.map((member) => ({ playerId: member.player_id, displayName: member.display_name, ready: member.ready })),
     };
     this.versions.set(room.id, snapshot.version);

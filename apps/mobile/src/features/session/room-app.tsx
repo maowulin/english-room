@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { sessionReducer, initialSessionState, type Screen, type RoomSummary, type RoomMemberView } from "./session-reducer";
+import { sessionReducer, initialSessionState, type Screen, type RoomMemberView } from "./session-reducer";
 import { AuthScreen as VisualAuthScreen } from "./auth-screen";
 import {
   demoMediaUiState,
@@ -109,12 +109,8 @@ function scoreJobsReady(items: ReportItem[]): boolean {
   return items.length > 0 && items.every((item) => item.status === "completed");
 }
 
-function visibleReportItems(
-  items: ReportItem[],
-  mediaMode: MediaUiState["mode"],
-  showAllMembers = false,
-): ReportItem[] {
-  if (mediaMode !== "demo" || showAllMembers) return items;
+function visibleReportItems(items: ReportItem[], mediaMode: MediaUiState["mode"]): ReportItem[] {
+  if (mediaMode !== "demo") return items;
   const localItem = items[0];
   return localItem ? [{ ...localItem, playerName: "You" }] : [];
 }
@@ -390,9 +386,19 @@ export function RoomApp({
       dispatch({
         type: "roomMembersUpdated",
         members: mapRoomMembers(update.room.members, playerRef.current),
+        room: {
+          id: update.room.id,
+          code: update.room.code,
+          title: update.room.title,
+          ownerPlayerId: update.room.ownerPlayerId,
+          turnIndex: update.room.turnIndex,
+          completedTurnCount: update.room.completedTurnCount,
+          currentSpeakerPlayerId: update.room.currentSpeakerPlayerId,
+          allTurnsCompleted: update.room.allTurnsCompleted,
+        },
       });
       if (update.room.status === "live") {
-        dispatch({ type: "roomStarted" });
+        dispatch({ type: "roomStarted", room: { currentSpeakerPlayerId: update.room.currentSpeakerPlayerId, completedTurnCount: update.room.completedTurnCount, allTurnsCompleted: update.room.allTurnsCompleted, turnIndex: update.room.turnIndex } });
       } else if (update.room.status === "ended" || update.room.status === "recording_failed") {
         dispatch({ type: "roomEnded" });
       }
@@ -419,7 +425,7 @@ export function RoomApp({
       .getRoomReport(roomId)
       .then((report) => {
         if (!active) return;
-        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        const items = visibleReportItems(report.items, mediaState.mode);
         setReportItems(items);
         setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
       })
@@ -511,6 +517,16 @@ export function RoomApp({
       }
     };
   }, [injectedMediaState, mediaMode]);
+  useEffect(() => {
+    if (mediaMode !== "real" || injectedMediaState || state.screen !== "live") return;
+    const rtc = rtcRef.current;
+    const playerId = playerRef.current?.id;
+    if (!rtc || !playerId || !mediaReady(mediaState)) return;
+    const shouldMute = state.room?.currentSpeakerPlayerId !== playerId;
+    if (rtc.getState().muted !== shouldMute) {
+      void rtc.setMuted(shouldMute).catch(() => undefined);
+    }
+  }, [injectedMediaState, mediaMode, mediaState, state.room?.currentSpeakerPlayerId, state.screen]);
   const ensureMicPermission = async () => {
     if (Platform.OS === "android") {
       setLiveMedia((current) => ({ ...current, permission: "requesting" }));
@@ -562,6 +578,8 @@ export function RoomApp({
       setLiveMedia((current) => ({ ...current, grant: "ready" }));
       try {
         await rtc.join(grant);
+        // Every player joins muted; the authoritative room turn decides who may speak.
+        await rtc.setMuted(true);
         setLiveMedia((current) => ({
           ...current,
           permission: current.permission === "denied" ? "denied" : "granted",
@@ -594,15 +612,17 @@ export function RoomApp({
     }
   };
   const enterRoomFlow = async (
-    room: RoomSummary & { id: string; version?: number },
+    room: Room,
     joinMethod: "room_code" | "recent_room" | "deep_link" | "invite",
     roomRole: "host" | "member",
   ) => {
     const player = playerRef.current;
+    let joinedRoom = room;
     let joinedMembers: RoomMember[] = [];
     let roomVersion = room.version ?? 1;
     if (player?.id) {
       const joined = await client.joinRoom(room.id, { playerId: player.id });
+      joinedRoom = joined;
       joinedMembers = joined.members;
       roomVersion = joined.version ?? roomVersion;
       const seatIndex = joinedMembers.findIndex((member) => member.playerId === player.id);
@@ -618,6 +638,7 @@ export function RoomApp({
       );
     } else {
       const snapshot = await client.getRoom(room.id);
+      joinedRoom = snapshot;
       joinedMembers = snapshot.members;
       roomVersion = snapshot.version ?? roomVersion;
     }
@@ -627,7 +648,11 @@ export function RoomApp({
         id: room.id,
         code: room.code,
         title: room.title,
-        ownerPlayerId: room.ownerPlayerId,
+        ownerPlayerId: joinedRoom.ownerPlayerId,
+        turnIndex: joinedRoom.turnIndex,
+        completedTurnCount: joinedRoom.completedTurnCount,
+        currentSpeakerPlayerId: joinedRoom.currentSpeakerPlayerId,
+        allTurnsCompleted: joinedRoom.allTurnsCompleted,
       },
       members: mapRoomMembers(joinedMembers, player),
     });
@@ -647,6 +672,10 @@ export function RoomApp({
   };
   const isRoomOwner =
     !state.room?.ownerPlayerId || state.room.ownerPlayerId === state.player?.id;
+  const isMyTurn = Boolean(
+    state.room?.currentSpeakerPlayerId && state.room.currentSpeakerPlayerId === state.player?.id,
+  );
+  const canEndRoom = isRoomOwner && state.room?.allTurnsCompleted === true;
   const auth = (nickname: string) => {
     if (busy) return;
     setApiError(undefined);
@@ -770,13 +799,48 @@ export function RoomApp({
             latency_ms: clampLatencyMs(startedAt),
           }),
         );
-        dispatch({ type: "roomStarted" });
+        dispatch({
+          type: "roomStarted",
+          room: {
+            turnIndex: room.turnIndex,
+            completedTurnCount: room.completedTurnCount,
+            currentSpeakerPlayerId: room.currentSpeakerPlayerId,
+            allTurnsCompleted: room.allTurnsCompleted,
+          },
+        });
       })
       .catch(fail)
       .finally(() => setBusy(false));
   };
+  const completeTurn = () => {
+    if (!roomId || busy || !isMyTurn) return;
+    setApiError(undefined);
+    setBusy(true);
+    void (async () => {
+      try {
+        if (mediaMode === "real" && rtcRef.current) {
+          await rtcRef.current.setMuted(true);
+        }
+        const next = await client.completeTurn(roomId);
+        dispatch({
+          type: "roomMembersUpdated",
+          members: mapRoomMembers(next.members, playerRef.current),
+          room: {
+            turnIndex: next.turnIndex,
+            completedTurnCount: next.completedTurnCount,
+            currentSpeakerPlayerId: next.currentSpeakerPlayerId,
+            allTurnsCompleted: next.allTurnsCompleted,
+          },
+        });
+      } catch (error) {
+        fail(error);
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
   const end = () => {
-    if (!roomId || busy || !isRoomOwner) return;
+    if (!roomId || busy || !canEndRoom) return;
     setApiError(undefined);
     setReportError(undefined);
     setBusy(true);
@@ -815,7 +879,7 @@ export function RoomApp({
         reportLoadStartedRef.current = roomId;
         dispatch({ type: "roomEnded" });
         const report = await pollRoomReport(client, roomId);
-        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        const items = visibleReportItems(report.items, mediaState.mode);
         setReportItems(items);
         if (reportPollingTimedOut(report)) {
           // The recording artifact is still considered available; only report generation timed out.
@@ -872,7 +936,7 @@ export function RoomApp({
     setReportError(undefined);
     void pollRoomReport(client, roomId)
       .then((report) => {
-        const items = visibleReportItems(report.items, mediaState.mode, Platform.OS === "web");
+        const items = visibleReportItems(report.items, mediaState.mode);
         setReportItems(items);
         if (reportPollingTimedOut(report)) {
           setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
@@ -954,7 +1018,12 @@ export function RoomApp({
           void reconnectMedia();
         }}
         onEnd={end}
-        canEnd={isRoomOwner}
+        allTurnsCompleted={state.room?.allTurnsCompleted === true}
+        completedTurnCount={state.room?.completedTurnCount ?? 0}
+        currentSpeakerPlayerId={state.room?.currentSpeakerPlayerId}
+        localPlayerId={state.player?.id}
+        onCompleteTurn={completeTurn}
+        canEnd={canEndRoom}
         members={state.members}
       />
     ),

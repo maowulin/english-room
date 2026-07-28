@@ -30,6 +30,10 @@ function backendRoom(overrides: Record<string, unknown> = {}) {
     title: "Harbor Mystery",
     status: "lobby",
     version: 1,
+    turn_index: 0,
+    completed_turn_count: 0,
+    current_speaker_player_id: null,
+    all_turns_completed: false,
     members: [{ player_id: "p1", ready: false }],
     ...overrides,
   };
@@ -184,6 +188,27 @@ describe("RoomRealtimeClient", () => {
     expect(protocolErrors.length).toBeGreaterThanOrEqual(1);
     expect(updates.some((item) => item.room.title === "stale")).toBe(false);
 
+    client.close();
+  });
+
+  it("preserves turn state from the authoritative realtime snapshot", () => {
+    const { factory, latest } = createMockWebSocketFactory();
+    const client = new RoomRealtimeClient({ apiBaseUrl: "http://api", webSocketFactory: factory });
+    const updates: RoomRealtimeUpdate[] = [];
+    client.subscribe((update) => updates.push(update));
+    client.connect({ roomId: "room-1", accessToken: "t" });
+    latest()?.onmessage?.({
+      data: envelope("room.snapshot", 2, backendRoom({
+        version: 2,
+        current_speaker_player_id: "p1",
+        completed_turn_count: 0,
+      })),
+    });
+
+    expect(updates[0]?.room).toMatchObject({
+      currentSpeakerPlayerId: "p1",
+      completedTurnCount: 0,
+    });
     client.close();
   });
 

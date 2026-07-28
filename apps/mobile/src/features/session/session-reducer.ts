@@ -15,6 +15,10 @@ export type RoomSummary = {
   code: string;
   title: string;
   ownerPlayerId?: string;
+  turnIndex?: number;
+  completedTurnCount?: number;
+  currentSpeakerPlayerId?: string;
+  allTurnsCompleted?: boolean;
 };
 
 export type Screen = "login" | "register" | "lobby" | "waiting" | "live" | "report";
@@ -31,8 +35,12 @@ export type SessionAction =
   | { type: "authenticated"; player: Player }
   | { type: "roomJoined"; room: RoomSummary; members?: RoomMemberView[] }
   | { type: "readyChanged"; ready: boolean; members?: RoomMemberView[] }
-  | { type: "roomMembersUpdated"; members: RoomMemberView[] }
-  | { type: "roomStarted" }
+  | {
+      type: "roomMembersUpdated";
+      members: RoomMemberView[];
+      room?: Partial<RoomSummary>;
+    }
+  | { type: "roomStarted"; room?: Partial<RoomSummary> }
   | { type: "roomEnded" }
   | { type: "showRegister" }
   | { type: "showLogin" }
@@ -62,9 +70,13 @@ export function sessionReducer(
         ),
       };
     case "roomMembersUpdated":
-      return { ...state, members: action.members };
+      return {
+        ...state,
+        members: action.members,
+        room: state.room && action.room ? { ...state.room, ...action.room } : state.room,
+      };
     case "roomStarted":
-      return { ...state, screen: "live" };
+      return { ...state, room: state.room && action.room ? { ...state.room, ...action.room } : state.room, screen: "live" };
     case "roomEnded":
       return { ...state, screen: "report" };
     case "showRegister":

@@ -4,6 +4,7 @@ const mockLeave = jest.fn(async () => undefined);
 const mockDispose = jest.fn();
 const mockUnsubscribe = jest.fn();
 const mockJoin = jest.fn(async () => undefined);
+const mockSetMuted = jest.fn(async () => undefined);
 const mockSubscribe = jest.fn(() => mockUnsubscribe);
 
 jest.mock("@/services/rtc-factory", () => ({
@@ -13,7 +14,7 @@ jest.mock("@/services/rtc-factory", () => ({
     dispose: mockDispose,
     subscribe: mockSubscribe,
     getState: () => ({ joined: true, muted: false, speakerOn: true, connection: "connected" }),
-    setMuted: jest.fn(async () => undefined),
+    setMuted: mockSetMuted,
     setSpeaker: jest.fn(async () => undefined),
     setConnectionState: jest.fn(async () => undefined),
   })),
@@ -54,6 +55,7 @@ describe("RoomApp real media lifecycle", () => {
     mockDispose.mockClear();
     mockUnsubscribe.mockClear();
     mockJoin.mockClear();
+    mockSetMuted.mockClear();
     mockSubscribe.mockClear();
     mockLeave.mockImplementation(async () => undefined);
   });
@@ -74,6 +76,7 @@ describe("RoomApp real media lifecycle", () => {
     });
     expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
     expect(mockJoin).toHaveBeenCalled();
+    expect(mockSetMuted).toHaveBeenCalledWith(true);
 
     await act(async () => {
       fireEvent.press(view.getByLabelText("Leave room"));
@@ -125,6 +128,9 @@ describe("RoomApp real media lifecycle", () => {
     const view = await render(<RoomApp client={new FakeRoomClient()} />);
     await enterLive(view);
 
+    await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
+    });
     await act(async () => {
       fireEvent.press(view.getByTestId("end-room-button"));
     });

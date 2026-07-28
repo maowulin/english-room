@@ -98,6 +98,9 @@ describe("RoomApp room realtime", () => {
           title: "Harbor Mystery",
           status: "waiting",
           version: 2,
+          turnIndex: 0,
+          completedTurnCount: 0,
+          allTurnsCompleted: false,
           members: [
             { playerId: "guest-1", displayName: "Avery", ready: false },
             { playerId: "guest-2", displayName: "Rowan", ready: true },

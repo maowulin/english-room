@@ -265,6 +265,9 @@ describe("RoomApp", () => {
     expect(view.queryByLabelText("Demo control panel")).toBeNull();
 
     await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
+    });
+    await act(async () => {
       fireEvent.press(view.getByTestId("end-room-button"));
     });
     expect(await view.findByText("Speaking report")).toBeTruthy();
@@ -334,6 +337,9 @@ describe("RoomApp", () => {
     });
     await act(async () => {
       fireEvent.press(view.getByTestId("start-room-button"));
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
     });
     await act(async () => {
       fireEvent.press(view.getByTestId("end-room-button"));
@@ -566,6 +572,69 @@ describe("RoomApp", () => {
     expect(view.getByLabelText("Speaker on")).toBeTruthy();
   });
 
+  it("shows Finish turn only for the current speaker and gates End room until all turns finish", async () => {
+    const view = await render(
+      <LiveScreen
+        allTurnsCompleted={false}
+        canEnd
+        completedTurnCount={0}
+        currentSpeakerPlayerId="local"
+        localPlayerId="local"
+        members={[
+          { playerId: "local", nickname: "Avery", isLocal: true, ready: true },
+          { playerId: "remote", nickname: "Rowan", isLocal: false, ready: true },
+        ]}
+        mediaState={realMediaState}
+        onCompleteTurn={() => undefined}
+        onEnd={() => undefined}
+      />,
+    );
+
+    expect(view.getByText("Your turn")).toBeTruthy();
+    expect(view.getByLabelText("Finish turn")).toBeTruthy();
+    expect(view.getByLabelText("End room").props.accessibilityState).toMatchObject({ disabled: true });
+
+    await act(async () => {
+      view.rerender(
+        <LiveScreen
+          allTurnsCompleted
+          canEnd
+          completedTurnCount={2}
+          currentSpeakerPlayerId={undefined}
+          localPlayerId="local"
+          members={[
+            { playerId: "local", nickname: "Avery", isLocal: true, ready: true },
+            { playerId: "remote", nickname: "Rowan", isLocal: false, ready: true },
+          ]}
+          mediaState={realMediaState}
+          onCompleteTurn={() => undefined}
+          onEnd={() => undefined}
+        />,
+      );
+    });
+    expect(view.queryByLabelText("Finish turn")).toBeNull();
+    expect(view.getByLabelText("End room").props.accessibilityState).toMatchObject({ disabled: false });
+  });
+
+  it("locks microphone controls for a player waiting for another turn", async () => {
+    const view = await render(
+      <LiveScreen
+        allTurnsCompleted={false}
+        currentSpeakerPlayerId="remote"
+        localPlayerId="local"
+        members={[
+          { playerId: "local", nickname: "Avery", isLocal: true, ready: true },
+          { playerId: "remote", nickname: "Rowan", isLocal: false, ready: true },
+        ]}
+        mediaState={realMediaState}
+        onEnd={() => undefined}
+      />,
+    );
+
+    expect(view.getByText("Rowan's turn")).toBeTruthy();
+    expect(view.getByLabelText("Mic locked")).toBeDisabled();
+  });
+
   it("shows local voice activity only after a real volume callback is reflected in state", async () => {
     const silent = await render(
       <LiveScreen
@@ -626,6 +695,9 @@ describe("RoomApp", () => {
 
     await moveToLive(view);
     await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
+    });
+    await act(async () => {
       fireEvent.press(view.getByTestId("end-room-button"));
     });
 
@@ -648,6 +720,9 @@ describe("RoomApp", () => {
     const view = await renderReal({ recording: "processing", report: "processing" });
 
     await moveToLive(view);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
+    });
     await act(async () => {
       fireEvent.press(view.getByTestId("end-room-button"));
     });
@@ -738,6 +813,8 @@ describe("RoomApp", () => {
     );
 
     expect(view.getByTestId("report-score-number")).toHaveTextContent("88");
+    expect(view.getByText("Your result")).toBeTruthy();
+    expect(view.queryByText("Player results")).toBeNull();
     expect(view.getByTestId("report-metric-Pronunciation")).toHaveTextContent("88");
     expect(view.getByTestId("report-metric-Fluency")).toHaveTextContent("94");
     expect(view.getByTestId("report-result-score-score-1")).toHaveTextContent("88");

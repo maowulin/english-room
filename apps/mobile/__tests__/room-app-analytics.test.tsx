@@ -232,6 +232,9 @@ describe("RoomApp analytics", () => {
       fireEvent.press(view.getByTestId("start-room-button"));
     });
     await act(async () => {
+      fireEvent.press(view.getByTestId("finish-turn-button"));
+    });
+    await act(async () => {
       fireEvent.press(await view.findByTestId("end-room-button"));
     });
 
@@ -278,6 +281,9 @@ describe("RoomApp analytics", () => {
       });
       await act(async () => {
         fireEvent.press(view.getByTestId("start-room-button"));
+      });
+      await act(async () => {
+        fireEvent.press(view.getByTestId("finish-turn-button"));
       });
       await act(async () => {
         fireEvent.press(await view.findByTestId("end-room-button"));
