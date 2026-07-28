@@ -20,7 +20,7 @@ describe("FakeRoomClient", () => {
   it("creates a room and lets a guest join by its code", async () => {
     const client = new FakeRoomClient();
     const session = await client.createGuestSession({ nickname: "Mint" });
-    const room = await client.createRoom({ title: "午夜会话" });
+    const room = await client.createRoom({ title: "Midnight Session" });
 
     await client.joinRoom(room.id, { playerId: session.playerId });
 
@@ -33,7 +33,7 @@ describe("FakeRoomClient", () => {
 
   it("exposes an end-state report and retries failed score jobs", async () => {
     const client = new FakeRoomClient();
-    const room = await client.createRoom({ title: "报告测试" });
+    const room = await client.createRoom({ title: "Report Test" });
 
     await client.endRoom(room.id);
     const report = await client.getRoomReport(room.id);

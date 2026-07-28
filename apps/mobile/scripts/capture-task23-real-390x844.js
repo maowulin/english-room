@@ -1,3 +1,5 @@
+/* eslint-env node */
+
 // Capture 390×844 real media UI states via Expo web + /qa-media harness.
 // Evidence class: Web 注入态视觉布局 only — not native/real TRTC runtime.
 const { chromium } = require("playwright-core");
