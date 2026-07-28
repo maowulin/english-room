@@ -259,7 +259,7 @@ export class HttpRoomClient implements RoomClient {
   async startRoom(roomId: string): Promise<Room> { return this.versioned(roomId, "POST", "/start"); }
   async endRoom(roomId: string): Promise<Room> { return this.versioned(roomId, "POST", "/end"); }
   async getRoomReport(roomId: string): Promise<RoomReport> {
-    const payload = await this.request(`/v1/rooms/${roomId}/report`, { method: "GET" }) as { room: RoomSnapshot; score_jobs: { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number>; failure_reason?: string | null }[] };
+    const payload = await this.request(`/v1/rooms/${roomId}/report`, { method: "GET" }) as { room: RoomSnapshot; score_jobs: { score_job_id: string; player_id: string; display_name?: string; status: ReportItem["status"]; scores?: Record<string, number>; failure_reason?: string | null }[] };
     this.mapRoom(payload.room);
     return {
       roomId,
@@ -271,7 +271,7 @@ export class HttpRoomClient implements RoomClient {
     };
   }
   async retryScoreJob(scoreJobId: string): Promise<ReportItem> {
-    const job = await this.request(`/v1/score-jobs/${scoreJobId}/retry`, { method: "POST" }) as { score_job_id: string; player_id: string; status: ReportItem["status"]; scores?: Record<string, number>; failure_reason?: string | null };
+    const job = await this.request(`/v1/score-jobs/${scoreJobId}/retry`, { method: "POST" }) as { score_job_id: string; player_id: string; display_name?: string; status: ReportItem["status"]; scores?: Record<string, number>; failure_reason?: string | null };
     return this.mapReportItem(job);
   }
   async issueRtcGrant(roomId: string): Promise<RtcGrantCredentials> {
@@ -296,10 +296,10 @@ export class HttpRoomClient implements RoomClient {
       ttlSeconds: payload.ttl_seconds,
     };
   }
-  private mapReportItem(job: { score_job_id: string; player_id: string; status: string; scores?: Record<string, number>; recognized_text?: string; failure_reason?: string | null }): ReportItem {
+  private mapReportItem(job: { score_job_id: string; player_id: string; display_name?: string; status: string; scores?: Record<string, number>; recognized_text?: string; failure_reason?: string | null }): ReportItem {
     const status = job.status === "success" ? "completed" : job.status;
     if (!["completed", "processing", "waiting", "failed"].includes(status)) throw new Error(`Unknown score status: ${job.status}`);
-    return { playerName: job.player_id, scoreJobId: job.score_job_id, status: status as ReportItem["status"], score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text, failureReason: job.failure_reason ?? undefined };
+    return { playerName: job.display_name ?? job.player_id, scoreJobId: job.score_job_id, status: status as ReportItem["status"], score: job.scores?.overall, pronunciation: job.scores?.pronunciation, fluency: job.scores?.fluency, recognizedText: job.recognized_text, failureReason: job.failure_reason ?? undefined };
   }
   private async versioned(roomId: string, method: "POST" | "PUT", suffix: string): Promise<Room> {
     await this.refreshVersion(roomId);

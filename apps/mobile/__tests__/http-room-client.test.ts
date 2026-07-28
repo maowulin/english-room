@@ -29,7 +29,7 @@ describe("HttpRoomClient", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "lobby", version: 3, owner_player_id: "p1", members: [] }) } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "lobby", version: 3, owner_player_id: "p1", members: [{ player_id: "p1", ready: false }] }) } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "lobby", version: 4, owner_player_id: "p1", members: [{ player_id: "p1", ready: false }, { player_id: "p2", ready: false }] }) } as Response)
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ room: { room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "processing", version: 5, owner_player_id: "p1", members: [] }, score_jobs: [{ score_job_id: "s1", player_id: "p1", status: "success", scores: { overall: 86, pronunciation: 88, fluency: 82 }, recognized_text: "Hello", failure_reason: null }, { score_job_id: "s2", player_id: "p2", status: "failed", scores: {}, failure_reason: "SOE service is not enabled; enable the new speech assessment service in the Tencent Cloud console" }] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ room: { room_id: "r1", room_code: "4827", title: "Harbor Mystery", status: "processing", version: 5, owner_player_id: "p1", members: [] }, score_jobs: [{ score_job_id: "s1", player_id: "p1", display_name: "Mint", status: "success", scores: { overall: 86, pronunciation: 88, fluency: 82 }, recognized_text: "Hello", failure_reason: null }, { score_job_id: "s2", player_id: "p2", display_name: "Avery", status: "failed", scores: {}, failure_reason: "SOE service is not enabled; enable the new speech assessment service in the Tencent Cloud console" }] }) } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ score_job_id: "s1", player_id: "p1", status: "processing", scores: {} }) } as Response);
     const client = new HttpRoomClient({ baseUrl: "http://api/", fetcher, idGenerator: () => "key-1" });
 
@@ -42,7 +42,7 @@ describe("HttpRoomClient", () => {
     await expect(client.joinRoom("r1", { playerId: "p2" })).resolves.toMatchObject({
       members: [{ playerId: "p1", ready: false }, { playerId: "p2", ready: false }],
     });
-    await expect(client.getRoomReport("r1")).resolves.toMatchObject({ roomId: "r1", items: [{ scoreJobId: "s1", status: "completed", score: 86 }, { scoreJobId: "s2", status: "failed", failureReason: "SOE service is not enabled; enable the new speech assessment service in the Tencent Cloud console" }] });
+    await expect(client.getRoomReport("r1")).resolves.toMatchObject({ roomId: "r1", items: [{ playerName: "Mint", scoreJobId: "s1", status: "completed", score: 86 }, { playerName: "Avery", scoreJobId: "s2", status: "failed", failureReason: "SOE service is not enabled; enable the new speech assessment service in the Tencent Cloud console" }] });
     await expect(client.retryScoreJob("s1")).resolves.toMatchObject({ status: "processing" });
 
     expect(fetcher).toHaveBeenNthCalledWith(2, "http://api/v1/rooms", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token", "Idempotency-Key": "key-1" }) }));
