@@ -290,7 +290,7 @@ describe("AnalyticsEvents", () => {
     const events = new AnalyticsEvents(client);
     const submitSpy = jest.spyOn(client, "submit").mockResolvedValue({
       accepted: false,
-      reason: "敏感字段被拒绝",
+      reason: "Sensitive field rejected",
     });
 
     expect(() =>

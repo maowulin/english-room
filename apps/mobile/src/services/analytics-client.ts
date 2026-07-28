@@ -340,13 +340,13 @@ export class AnalyticsClient {
       if (violation) {
         return {
           accepted: false,
-          reason: `敏感字段被拒绝：${violation}`,
+          reason: `Sensitive field rejected: ${violation}`,
         };
       }
 
       const userId = this.resolveUserId?.()?.trim() || this.context.userId.trim();
       if (!userId) {
-        return { accepted: false, reason: "缺少 user_id" };
+        return { accepted: false, reason: "Missing user_id" };
       }
 
       const record = buildWireRecord(this.context, event, properties, userId, options);

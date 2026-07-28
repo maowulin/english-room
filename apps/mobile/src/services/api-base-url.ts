@@ -7,7 +7,7 @@ export function httpApiBaseUrlToWebSocketBaseUrl(httpBaseUrl: string): string {
   const trimmed = httpBaseUrl.trim().replace(/\/+$/, "");
   if (trimmed.startsWith("https://")) return `wss://${trimmed.slice("https://".length)}`;
   if (trimmed.startsWith("http://")) return `ws://${trimmed.slice("http://".length)}`;
-  throw new Error(`无法将 API Base URL 转为 WebSocket URL：${httpBaseUrl}`);
+  throw new Error(`Cannot convert API base URL to a WebSocket URL: ${httpBaseUrl}`);
 }
 
 export function buildRoomEventsWebSocketUrl(apiBaseUrl: string, roomId: string): string {

@@ -379,7 +379,9 @@ stateDiagram-v2
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `POST` | `/v1/guest-sessions` | 创建 Demo 玩家身份和短期访问令牌 |
+| `POST` | `/v1/guest-sessions` | 创建带 24 小时有效期的 Demo 玩家身份和短期访问令牌 |
+| `POST` | `/v1/guest-sessions/refresh` | 过期前轮换游客 token，保留 player_id 和 profile |
+| `DELETE` | `/v1/guest-sessions/me` | 撤销当前游客会话 |
 | `POST` | `/v1/rooms` | 创建房间 |
 | `GET` | `/v1/rooms/by-code/{roomCode}` | 查询可加入房间 |
 | `POST` | `/v1/rooms/{roomId}/members` | 加入房间并分配席位 |

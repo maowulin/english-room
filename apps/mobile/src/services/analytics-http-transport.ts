@@ -28,7 +28,7 @@ const ANALYTICS_EVENTS_PATH = "/v1/analytics/events";
 function resolveFetcher(fetcher?: AnalyticsFetcher): AnalyticsFetcher {
   const runtime = fetcher ?? globalThis.fetch?.bind(globalThis);
   if (!runtime) {
-    throw new Error("当前运行环境未提供 fetch，无法发送 Analytics");
+    throw new Error("fetch is unavailable in this runtime; cannot send analytics");
   }
   return runtime;
 }
@@ -68,7 +68,7 @@ export async function sendAnalyticsEvents(
     });
 
     if (!response.ok) {
-      throw new AnalyticsHttpError(`Analytics 请求失败（HTTP ${response.status}）`, response.status);
+    throw new AnalyticsHttpError(`Analytics request failed (HTTP ${response.status})`, response.status);
     }
   } finally {
     clearTimeout(timeoutId);

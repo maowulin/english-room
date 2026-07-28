@@ -199,7 +199,7 @@ describe("AnalyticsClient", () => {
       client.submit({ name: "app_opened", payload: payload as never }),
     ).resolves.toEqual({
       accepted: false,
-      reason: expect.stringMatching(/敏感|sensitive/i),
+      reason: expect.stringMatching(/sensitive/i),
     });
     expect(transport).not.toHaveBeenCalled();
   });

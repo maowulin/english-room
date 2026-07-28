@@ -35,7 +35,7 @@ describe("ApiClient", () => {
     });
 
     await expect(client.getHealth()).rejects.toThrow(
-      "后端健康检查失败（HTTP 503）",
+      "Backend health check failed (HTTP 503)",
     );
   });
 
@@ -52,7 +52,7 @@ describe("ApiClient", () => {
     });
 
     await expect(client.getHealth()).rejects.toThrow(
-      "后端健康检查返回格式无效",
+      "Backend health check returned an invalid payload",
     );
   });
 });

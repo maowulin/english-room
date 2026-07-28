@@ -36,11 +36,11 @@ export class ApiClient {
   async getHealth(): Promise<HealthStatus> {
     const response = await this.fetcher(`${this.baseUrl}/health`);
     if (!response.ok) {
-      throw new ApiClientError(`后端健康检查失败（HTTP ${response.status}）`);
+      throw new ApiClientError(`Backend health check failed (HTTP ${response.status})`);
     }
     const payload: unknown = await response.json();
     if (!isHealthStatus(payload)) {
-      throw new ApiClientError("后端健康检查返回格式无效");
+      throw new ApiClientError("Backend health check returned an invalid payload");
     }
     return payload;
   }

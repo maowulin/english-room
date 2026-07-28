@@ -27,6 +27,16 @@ function wrapAnalytics(spy: ReturnType<typeof createAnalyticsSpy>): AnalyticsEve
   return spy as unknown as AnalyticsEvents;
 }
 
+const readyRealMediaState = {
+  mode: "real" as const,
+  network: "good" as const,
+  permission: "granted" as const,
+  grant: "ready" as const,
+  rtc: "joined" as const,
+  recording: "idle" as const,
+  report: "waiting" as const,
+};
+
 describe("RoomApp analytics", () => {
   afterEach(cleanup);
 
@@ -60,7 +70,7 @@ describe("RoomApp analytics", () => {
       );
 
       await act(async () => {
-        fireEvent.press(view.getByTestId("login-button"));
+        fireEvent.press(view.getByTestId("demo-guest-button"));
         await Promise.resolve();
         await Promise.resolve();
       });
@@ -99,13 +109,13 @@ describe("RoomApp analytics", () => {
 
     const view = await render(<RoomApp client={new FakeRoomClient()} />);
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
     });
 
-    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+    expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -113,11 +123,15 @@ describe("RoomApp analytics", () => {
   it("emits guest_session_created after successful guest login", async () => {
     const analytics = createAnalyticsSpy();
     const view = await render(
-      <RoomApp analyticsEvents={wrapAnalytics(analytics)} client={new FakeRoomClient()} />,
+      <RoomApp
+        analyticsEvents={wrapAnalytics(analytics)}
+        client={new FakeRoomClient()}
+        mediaState={readyRealMediaState}
+      />,
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
 
     expect(analytics.guestSessionCreated).toHaveBeenCalledTimes(1);
@@ -134,16 +148,20 @@ describe("RoomApp analytics", () => {
   it("emits room_created and room_joined after create-room success", async () => {
     const analytics = createAnalyticsSpy();
     const view = await render(
-      <RoomApp analyticsEvents={wrapAnalytics(analytics)} client={new FakeRoomClient()} />,
+      <RoomApp
+        analyticsEvents={wrapAnalytics(analytics)}
+        client={new FakeRoomClient()}
+        mediaState={readyRealMediaState}
+      />,
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
     });
-    expect(await view.findByText("等待同伴入座")).toBeTruthy();
+    expect(await view.findByText("Waiting for everyone to take a seat")).toBeTruthy();
 
     expect(analytics.roomCreated).toHaveBeenCalledTimes(1);
     expect(analytics.roomCreated.mock.calls[0][0]).toMatchObject({
@@ -160,11 +178,15 @@ describe("RoomApp analytics", () => {
   it("emits room_ready_changed and room_started on successful lobby actions", async () => {
     const analytics = createAnalyticsSpy();
     const view = await render(
-      <RoomApp analyticsEvents={wrapAnalytics(analytics)} client={new FakeRoomClient()} />,
+      <RoomApp
+        analyticsEvents={wrapAnalytics(analytics)}
+        client={new FakeRoomClient()}
+        mediaState={readyRealMediaState}
+      />,
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
@@ -176,7 +198,7 @@ describe("RoomApp analytics", () => {
       fireEvent.press(view.getByTestId("start-room-button"));
     });
 
-    expect(await view.findByText("正在练习")).toBeTruthy();
+    expect(await view.findByText("In progress")).toBeTruthy();
     expect(analytics.roomReadyChanged).toHaveBeenCalledWith(
       expect.objectContaining({ ready_state: "ready" }),
     );
@@ -190,11 +212,15 @@ describe("RoomApp analytics", () => {
   it("emits room_ended and score_report_viewed after end-room success", async () => {
     const analytics = createAnalyticsSpy();
     const view = await render(
-      <RoomApp analyticsEvents={wrapAnalytics(analytics)} client={new FakeRoomClient()} />,
+      <RoomApp
+        analyticsEvents={wrapAnalytics(analytics)}
+        client={new FakeRoomClient()}
+        mediaState={readyRealMediaState}
+      />,
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
     await act(async () => {
       fireEvent.press(await view.findByTestId("create-room-button"));
@@ -209,7 +235,7 @@ describe("RoomApp analytics", () => {
       fireEvent.press(await view.findByTestId("end-room-button"));
     });
 
-    expect(await view.findByText("本局口语报告")).toBeTruthy();
+    expect(await view.findByText("Speaking report")).toBeTruthy();
     expect(analytics.roomEnded).toHaveBeenCalledTimes(1);
     expect(analytics.scoreReportViewed).toHaveBeenCalledTimes(1);
     expect(analytics.scoreReportViewed.mock.calls[0][0]).toMatchObject({
@@ -219,35 +245,56 @@ describe("RoomApp analytics", () => {
 
   it("emits score_retry_requested only after retry API success", async () => {
     const analytics = createAnalyticsSpy();
-    const view = await render(
-      <RoomApp analyticsEvents={wrapAnalytics(analytics)} client={new FakeRoomClient()} />,
-    );
+    const previousMediaMode = process.env.EXPO_PUBLIC_MEDIA_MODE;
+    process.env.EXPO_PUBLIC_MEDIA_MODE = "real";
+    try {
+      const view = await render(
+        <RoomApp
+          analyticsEvents={wrapAnalytics(analytics)}
+          client={new FakeRoomClient()}
+          mediaState={{
+            mode: "real",
+            network: "good",
+            permission: "granted",
+            grant: "ready",
+            rtc: "joined",
+            recording: "idle",
+            report: "waiting",
+          }}
+        />,
+      );
 
-    await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
-    });
-    await act(async () => {
-      fireEvent.press(await view.findByTestId("create-room-button"));
-    });
-    await act(async () => {
-      fireEvent.press(view.getByTestId("ready-button"));
-    });
-    await act(async () => {
-      fireEvent.press(view.getByTestId("start-room-button"));
-    });
-    await act(async () => {
-      fireEvent.press(await view.findByTestId("end-room-button"));
-    });
-    await act(async () => {
-      fireEvent.press(await view.findByLabelText("重试评分"));
-    });
+      await act(async () => {
+        fireEvent.press(view.getByTestId("demo-guest-button"));
+      });
+      await act(async () => {
+        fireEvent.press(await view.findByTestId("create-room-button"));
+      });
+      await act(async () => {
+        fireEvent.press(view.getByTestId("ready-button"));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        fireEvent.press(view.getByTestId("start-room-button"));
+      });
+      await act(async () => {
+        fireEvent.press(await view.findByTestId("end-room-button"));
+      });
+      await act(async () => {
+        fireEvent.press(await view.findByLabelText("Retry scoring"));
+      });
 
-    expect(analytics.scoreRetryRequested).toHaveBeenCalledTimes(1);
-    expect(analytics.scoreRetryRequested.mock.calls[0][0]).toMatchObject({
-      retry_reason: "user_action",
-      attempt_number: 1,
-    });
-    expect(analytics.scoreRetryRequested.mock.calls[0][0]?.score_job_id).toMatch(/^score-room-/);
+      expect(analytics.scoreRetryRequested).toHaveBeenCalledTimes(1);
+      expect(analytics.scoreRetryRequested.mock.calls[0][0]).toMatchObject({
+        retry_reason: "user_action",
+        attempt_number: 1,
+      });
+      expect(analytics.scoreRetryRequested.mock.calls[0][0]?.score_job_id).toMatch(/^score-room-/);
+    } finally {
+      process.env.EXPO_PUBLIC_MEDIA_MODE = previousMediaMode;
+    }
   });
 
   it("does not emit guest_session_created when login API fails", async () => {
@@ -260,7 +307,7 @@ describe("RoomApp analytics", () => {
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
 
     expect(analytics.guestSessionCreated).not.toHaveBeenCalled();
@@ -277,9 +324,9 @@ describe("RoomApp analytics", () => {
     );
 
     await act(async () => {
-      fireEvent.press(view.getByTestId("login-button"));
+      fireEvent.press(view.getByTestId("demo-guest-button"));
     });
 
-    expect(await view.findByText("今晚想练哪一句？")).toBeTruthy();
+    expect(await view.findByText("What would you like to practice tonight?")).toBeTruthy();
   });
 });
