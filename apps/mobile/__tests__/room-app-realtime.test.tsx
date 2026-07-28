@@ -1,5 +1,22 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 
+const mockRtcJoin = jest.fn(async () => undefined);
+const mockRtcLeave = jest.fn(async () => undefined);
+const mockRtcDispose = jest.fn();
+const mockRtcSubscribe = jest.fn(() => () => undefined);
+
+jest.mock("@/services/rtc-factory", () => ({
+  createRtcClient: jest.fn(() => ({
+    join: mockRtcJoin,
+    leave: mockRtcLeave,
+    dispose: mockRtcDispose,
+    subscribe: mockRtcSubscribe,
+    getState: () => ({ joined: true, muted: false, speakerOn: true, connection: "connected" }),
+    setMuted: jest.fn(async () => undefined),
+    setSpeaker: jest.fn(async () => undefined),
+  })),
+}));
+
 import { RoomApp } from "@/features/session/room-app";
 import type { MediaUiState } from "@/features/session/story-screens";
 import { FakeRoomClient, type RoomClient } from "@/services/room-client";
@@ -154,6 +171,54 @@ describe("RoomApp room realtime", () => {
     expect(view.queryByLabelText("API error")).toBeNull();
     expect(view.queryByLabelText("Real voice mode")).toBeNull();
     expect(view.getByText("TRTC: Waiting for connection")).toBeTruthy();
+  });
+
+  it("polls and resolves the report for a member when realtime announces room end", async () => {
+    const previousMode = process.env.EXPO_PUBLIC_MEDIA_MODE;
+    process.env.EXPO_PUBLIC_MEDIA_MODE = "real";
+    const { factory, connect, emitUpdate } = createControllableRealtimeFactory();
+    const client = new RealtimeCapableRoomClient();
+    jest.spyOn(client, "getRoomReport").mockResolvedValue({
+      roomId: "room-ended",
+      roomStatus: "ended",
+      items: [{ playerName: "Rowan", score: 91, scoreJobId: "score-rowan", status: "completed" }],
+    });
+    try {
+      const view = await render(<RoomApp client={client} realtimeClientFactory={factory} />);
+      await act(async () => {
+        fireEvent.press(view.getByTestId("demo-guest-button"));
+      });
+      await act(async () => {
+        fireEvent.press(await view.findByTestId("create-room-button"));
+      });
+      await view.findByText("Waiting for everyone to take a seat");
+      const roomId = connect.mock.calls[0]![0]!.roomId;
+
+      await act(async () => {
+        emitUpdate({
+          type: "room.updated",
+          roomId,
+          roomVersion: 4,
+          room: {
+            id: roomId,
+            code: "4827",
+            title: "Harbor Mystery",
+            status: "ended",
+            version: 4,
+            turnIndex: 1,
+            completedTurnCount: 1,
+            allTurnsCompleted: true,
+            members: [{ playerId: "guest-1", displayName: "Rowan", ready: true }],
+          },
+        });
+      });
+
+      expect(await view.findByTestId("report-score-number")).toHaveTextContent("91");
+      expect(view.getByText("Scoring complete")).toBeTruthy();
+      expect(view.queryByTestId("report-loading-screen")).toBeNull();
+    } finally {
+      process.env.EXPO_PUBLIC_MEDIA_MODE = previousMode;
+    }
   });
 
   it("does not mark a real room ready before TRTC has joined", async () => {

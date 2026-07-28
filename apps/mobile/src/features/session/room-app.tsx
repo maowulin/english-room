@@ -421,16 +421,27 @@ export function RoomApp({
     if (state.screen !== "report" || !roomId || reportLoadStartedRef.current === roomId) return;
     reportLoadStartedRef.current = roomId;
     let active = true;
-    void client
-      .getRoomReport(roomId)
+    setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+    void pollRoomReport(client, roomId)
       .then((report) => {
         if (!active) return;
         const items = visibleReportItems(report.items, mediaState.mode);
         setReportItems(items);
-        setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+        if (reportPollingTimedOut(report)) {
+          setReportError(REPORT_GENERATION_TIMEOUT_MESSAGE);
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+        } else if (scoreJobsReady(items)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "ready" }));
+        } else if (scoreJobsTerminal(items)) {
+          setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
+        } else {
+          setLiveMedia((current) => ({ ...current, recording: "processing", report: "processing" }));
+        }
       })
       .catch(() => {
-        if (active) setReportError("Could not load the report. Please try again.");
+        if (!active) return;
+        setReportError("Could not load the report. Please try again.");
+        setLiveMedia((current) => ({ ...current, recording: "ready", report: "failed" }));
       });
     return () => {
       active = false;
@@ -1029,7 +1040,7 @@ export function RoomApp({
     ),
     report:
       mediaState.mode === "real" && mediaState.report === "processing" ? (
-        <ReportLoadingScreen onDone={leaveSession} />
+        <ReportLoadingScreen />
       ) : (
         <ReportScreen error={reportError} items={reportItems} mediaState={mediaState} onDone={leaveSession} onRefresh={refreshReport} onRetry={retry} />
       ),

@@ -706,14 +706,16 @@ describe("RoomApp", () => {
     expect(view.queryByTestId("report-score-card")).toBeNull();
   });
 
-  it("renders the report loading state without showing placeholder scores", async () => {
-    const view = await render(<ReportLoadingScreen onDone={() => undefined} />);
+  it("renders the report loading state without showing placeholder scores or exit controls", async () => {
+    const view = await render(<ReportLoadingScreen />);
 
     expect(view.getByTestId("report-loading-screen")).toBeTruthy();
     expect(StyleSheet.flatten(view.getByTestId("report-loading-screen").props.style)).toMatchObject({ flex: 1 });
     expect(view.getByText("Generating your speaking report")).toBeTruthy();
     expect(view.getByText("Your score will appear here when analysis is complete")).toBeTruthy();
     expect(view.queryByText("—")).toBeNull();
+    expect(view.queryByTestId("report-loading-back")).toBeNull();
+    expect(view.queryByLabelText("Back to lobby")).toBeNull();
   });
 
   it("shows room processing and waits for all real report scores before success summary", async () => {

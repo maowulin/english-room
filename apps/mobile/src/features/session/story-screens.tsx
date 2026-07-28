@@ -280,14 +280,12 @@ function roomProcessingLabels(mediaState: MediaUiState) {
   return labels;
 }
 
-export function ReportLoadingScreen({ onDone }: { onDone: () => void }) {
+export function ReportLoadingScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={[styles.reportLoading, fidelityStyles.report]} testID="report-loading-screen">
         <View style={styles.reportHeader}>
-          <Pressable accessibilityLabel="Back from report loading" onPress={onDone} style={fidelityStyles.reportHeaderBack} testID="report-loading-back">
-            <AppIcon color="#174638" name="arrow-left" size={24} />
-          </Pressable>
+          <View style={styles.reportLoadingHeaderSpacer} />
           <Text style={styles.reportTitle}>Speaking report</Text>
           <View style={styles.reportLoadingHeaderSpacer} />
         </View>
@@ -300,12 +298,6 @@ export function ReportLoadingScreen({ onDone }: { onDone: () => void }) {
           <ActivityIndicator color="#2A8B67" size="large" />
           <Text style={styles.reportLoadingHint}>Your score will appear here when analysis is complete</Text>
         </View>
-        <Pressable accessibilityLabel="Back to lobby" onPress={onDone} style={styles.return}>
-          <View style={styles.inlineButtonContent}>
-            <AppIcon color="#FFF" name="house" size={19} />
-            <Text style={styles.returnText}>Back to lobby</Text>
-          </View>
-        </Pressable>
       </View>
     </SafeAreaView>
   );
